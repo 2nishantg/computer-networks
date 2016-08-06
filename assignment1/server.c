@@ -5,6 +5,7 @@
 #include <string.h>
 #include <netdb.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -16,8 +17,7 @@
 #define BACKLOG 10
 
 
-int sendInt(int num, int fd)
-{
+int sendInt(int num, int fd) {
   printf("Sending %d\n", num);
   int32_t conv = htonl(num);
   char *data = (char*)&conv;
@@ -30,12 +30,11 @@ int sendInt(int num, int fd)
   }
   return 0;
 }
-int receiveInt(int *num, int fd)
-{
+
+int receiveInt(int *num, int fd) {
   int32_t ret;
   char *data = (char*)&ret;
   int left = sizeof(ret);
-  int rc;
   while (left) {
     ret = read(fd, data + sizeof(ret) - left, left);
     if (ret < 0) return -1;
@@ -48,20 +47,13 @@ int receiveInt(int *num, int fd)
 int sendFile(char * fileName,  int sock) {
   int nread;
   FILE* fd;
-  struct stat stat_buf;      /* argument to fstat */
   char buffer[1024];
-  int size;
 
   fd = fopen(fileName, "r");
-
-  /* get the size of the file to be sent */
-  fstat(fd, &stat_buf);
-  size = stat_buf.st_size;
 
   for(nread = fread(buffer, 1, sizeof(buffer), fd); nread > 0; nread = fread(buffer, 1, sizeof(buffer), fd) ) {
     send(sock, buffer, nread, 0);
   }
-  //  shutdown(sock, SHUT_WR);
   fclose(fd);
   return 0;
 }
@@ -73,13 +65,9 @@ int main()
     struct sockaddr_in dest;
     int socket_fd, client_fd,num;
     socklen_t size;
-    struct stat stat_buf;      /* argument to fstat */
+    struct stat stat_buf;
     char fileName[1024];
-    FILE* filed;
-//  memset(buffer,0,sizeof(buffer));
     int yes =1;
-
-
 
     if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0))== -1) {
         fprintf(stderr, "Socket failure!!\n");
@@ -106,9 +94,7 @@ int main()
     }
 
    while(1) {
-
         size = sizeof(struct sockaddr_in);
-
         if ((client_fd = accept(socket_fd, (struct sockaddr *)&dest, &size))==-1 ) {
             perror("accept");
             exit(1);
@@ -122,7 +108,6 @@ int main()
                 }
                 else if (num == 0) {
                         printf("Connection closed\n");
-                        //So I can now wait for another client
                         break;
                 }
                 fileName[num] = '\0';
@@ -131,25 +116,15 @@ int main()
                   stat(fileName, &stat_buf);
                   size = stat_buf.st_size;
                   printf("File Size : %d\n", size);
-                  //                  snprintf ( buffer, 100, "%d", size );
-                  // file exists
                   sendInt(size, client_fd);
                   sendFile(fileName, client_fd);
                 } else {
                   sendInt(-1, client_fd);
-                  // file doesn't exist
                 }
-                /* if ((send(client_fd,buffer, 1,0))== -1) */
-                /* { */
-                /*      fprintf(stderr, "Failure Sending Message\n"); */
-                /*      close(client_fd); */
-                /*      break; */
-                /* } /* *\/ */
-                /* printf("Server:Msg being sent: %s\nNumber of bytes sent: %d\n",buffer, strlen(buffer)); */
-        } //End of Inner While...
-        //Close Connection Socket
+        }
+
         close(client_fd);
-    } //Outer While
+    }
    close(socket_fd);
 
    return 0;

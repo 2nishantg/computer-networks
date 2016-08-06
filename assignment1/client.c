@@ -6,6 +6,7 @@
 #include <string.h>
 #include <netdb.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -66,7 +67,7 @@ int readFile(char * fileName, int size, int sock) {
     nread = recv(sock, buffer, sizeof(buffer),0);
     rtotal+=nread;
     if (nread != 1024) buffer[nread] = 0;
-    //printf("%s", buffer);
+    fwrite(buffer, 1, nread, stdout);
     fwrite(buffer, 1, nread, fd);
   }
   fclose(fd);
@@ -123,6 +124,11 @@ int main(int argc, char *argv[])
           {
             printf("Client:File of size %d exists\nClient:Recieving\n", size);
             //            int fd = open("Temp.txt", O_WRONLY);
+            struct stat st = {0};
+
+            if (stat("./ctest", &st) == -1) {
+              mkdir("/ctest", 0755);
+            }
             prepend(fileName, "ctest/");
             readFile(fileName, size, socket_fd);
           }
