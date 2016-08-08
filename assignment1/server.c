@@ -13,17 +13,24 @@
 
 #include "helpers.h"
 
-#define PORT 3490
-#define BACKLOG 10
 
-int main() {
+char *welcome = "Welcome to Alchemist!\n";
+char *filePrompt = "Enter the filename of file you want to download: \0";
+
+int main(int argc, char *argv[]) {
   struct sockaddr_in server;
   struct sockaddr_in dest;
   int socket_fd, client_fd, num;
   socklen_t size;
   struct stat stat_buf;
-  char fileName[1024];
+  char fileName[BUFFER];
   int yes = 1;
+
+  if (argc != 2) {
+    fprintf(stderr, "Usage: %s port port\n", argv[0]);
+    exit(1);
+  }
+
 
   if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
     fprintf(stderr, "Socket failure!!\n");
@@ -38,10 +45,10 @@ int main() {
   memset(&server, 0, sizeof(server));
   memset(&dest, 0, sizeof(dest));
   server.sin_family = AF_INET;
-  server.sin_port = htons(PORT);
+  server.sin_port = htons(atoi(argv[1]));
   server.sin_addr.s_addr = INADDR_ANY;
   if ((bind(socket_fd, (struct sockaddr *)&server, sizeof(struct sockaddr))) ==
-      -1) { // sizeof(struct sockaddr)
+      -1) {
     fprintf(stderr, "Binding Failure\n");
     exit(1);
   }
@@ -51,6 +58,7 @@ int main() {
     exit(1);
   }
 
+
   while (1) {
     size = sizeof(struct sockaddr_in);
     if ((client_fd = accept(socket_fd, (struct sockaddr *)&dest, &size)) ==
@@ -59,12 +67,19 @@ int main() {
       exit(1);
     }
     printf("Server got connection from client %s\n", inet_ntoa(dest.sin_addr));
+    FILE *fd = fdopen(client_fd, "r+");
+    bzero(fileName, BUFFER);
+    strcpy(fileName, welcome);
+    writeBuffer(fileName, BUFFER, fd);
 
     while (1) {
-      if ((num = recv(client_fd, fileName, 1024, 0)) == -1) {
+      bzero(fileName, BUFFER);
+      strcpy(fileName, filePrompt);
+      writeBuffer(fileName, BUFFER, fd);
+      if ((num = readBuffer(fileName, BUFFER, fd)) == 0) {
         perror("recv");
         exit(1);
-      } else if (num == 0) {
+      } else if (num == -1) {
         printf("Connection closed\n");
         break;
       }
@@ -74,15 +89,14 @@ int main() {
         stat(fileName, &stat_buf);
         size = stat_buf.st_size;
         printf("File Size : %d\n", size);
-        sendInt(size, client_fd);
-        sendFile(fileName, client_fd);
+        writeInt(size, fd);
+        writeFile(fileName, size, fd);
       } else {
-        sendInt(-1, client_fd);
+        writeInt(-1, fd);
       }
     }
     close(client_fd);
   }
   close(socket_fd);
-
   return 0;
 }

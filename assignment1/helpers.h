@@ -11,32 +11,21 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-int sendInt(int num, int fd) {
+#define BACKLOG 10
+#define BUFFER 1024
+#define min(a, b) (a < b) ? a : b
+#define miax(a, b) (a > b) ? a : b
+
+int writeInt(int num, FILE *fd) {
   int32_t conv = htonl(num);
-  char *data = (char *)&conv;
-  int left = sizeof(conv);
-  int rc;
-  while (left) {
-    rc = write(fd, data + sizeof(conv) - left, left);
-    if (rc < 0)
-      return -1;
-    left -= rc;
-  }
+  fprintf(fd, "%d.4", conv);
   return 0;
 }
 
-int receiveInt(int *num, int fd) {
-  int32_t ret, rt;
-  char *data = (char *)&ret;
-  int left = sizeof(ret);
-  while (left) {
-    rt = read(fd, data + sizeof(ret) - left, left);
-    if (rt < 0)
-      return -1;
-    left -= rt;
-  }
+int readInt(int *num, FILE *fd) {
+  int32_t ret;
+  fscanf(fd, "%d.4", &ret);
   *num = ntohl(ret);
-  printf("Received %d\n", *num);
   return 0;
 }
 
@@ -47,32 +36,54 @@ void prepend(char *s, const char *t) {
     s[i] = t[i];
 }
 
-int readFile(char *fileName, int size, int sock) {
-  int nread, rtotal = 0;
-  FILE *fd;
-  char buffer[1024];
-  fd = fopen(fileName, "w");
-  for (; rtotal < size;) {
-    nread = recv(sock, buffer, sizeof(buffer), 0);
-    rtotal += nread;
-    if (nread != 1024)
-      buffer[nread] = 0;
-    fwrite(buffer, 1, nread, stdout);
-    fwrite(buffer, 1, nread, fd);
+int writeBuffer(char *buffer, size_t size, FILE *fd) {
+  int sent = 0, total_sent = 0;
+  while (total_sent < size) {
+    if ((sent = fwrite(buffer + total_sent, 1, size - total_sent, fd)) == 0) {
+      return -1;
+    }
+    total_sent += sent;
   }
-  fclose(fd);
+  return total_sent;
+}
+
+int readBuffer(char *buffer, size_t size, FILE *fd) {
+  int received = 0, total_received = 0;
+  while (total_received < size) {
+    if ((received = fread(buffer + total_received, 1, size - total_received,
+                          fd)) == 0) {
+      return -1;
+    }
+    total_received += received;
+  }
+  return total_received;
+}
+
+int readFile(char *fileName, int size, FILE *fd) {
+  int nread, rtotal = 0;
+  FILE *filed = fopen(fileName, "w");
+  char buffer[BUFFER];
+  while (rtotal < size) {
+    bzero(buffer, sizeof(buffer));
+    nread = readBuffer(buffer, sizeof(buffer), fd);
+    fwrite(buffer, 1, min(size - rtotal, sizeof(buffer)), filed);
+    rtotal += nread;
+  }
+  fclose(filed);
   return 0;
 }
 
-int sendFile(char *fileName, int sock) {
-  int nread;
-  FILE *fd;
-  char buffer[1024];
-  fd = fopen(fileName, "r");
-  for (nread = fread(buffer, 1, sizeof(buffer), fd); nread > 0;
-       nread = fread(buffer, 1, sizeof(buffer), fd)) {
-    send(sock, buffer, nread, 0);
+int writeFile(char *fileName, size_t size, FILE *fd) {
+  int nread, rtotal = 0;
+  FILE *filed;
+  char buffer[BUFFER];
+  filed = fopen(fileName, "r");
+  while (rtotal < size) {
+    bzero(buffer, sizeof(buffer));
+    nread = fread(buffer, 1, sizeof(buffer), filed);
+    rtotal += nread;
+    writeBuffer(buffer, sizeof(buffer), fd);
   }
-  fclose(fd);
+  fclose(filed);
   return 0;
 }

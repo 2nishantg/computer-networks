@@ -14,14 +14,12 @@
 
 #include "helpers.h"
 
-#define PORT 3490
-#define MAXSIZE 1024
 
 int main(int argc, char *argv[]) {
   struct sockaddr_in server_info;
   struct hostent *he;
   int socket_fd, size;
-  char fileName[1024];
+  char fileName[BUFFER];
 
   if (argc != 3) {
     fprintf(stderr, "Usage: %s hostname port\n", argv[0]);
@@ -49,27 +47,29 @@ int main(int argc, char *argv[]) {
     perror("connect");
     exit(1);
   }
+  FILE *fd = fdopen(socket_fd,"r+");
+  readBuffer(fileName,sizeof(fileName),fd);
+  printf("%s",fileName);
 
   while (1) {
-    printf("Client: Enter File name for Server:");
-    fgets(fileName, MAXSIZE - 1, stdin);
-    fileName[strcspn(fileName, "\n")] = 0;
-    if ((send(socket_fd, fileName, strlen(fileName), 0)) == -1) {
+    readBuffer(fileName,sizeof(fileName),fd);
+    printf("%s",fileName);
+    scanf("%s", fileName);
+    if ((writeBuffer(fileName, BUFFER, fd)) == -1) {
       fprintf(stderr, "Failure Sending Message\n");
       close(socket_fd);
       exit(1);
     } else {
       printf("Client:Filename sent: %s\n", fileName);
-      receiveInt(&size, socket_fd);
+      readInt(&size, fd);
       if (size >= 0) {
         printf("Client:File of size %d exists\nClient:Recieving\n", size);
-
         struct stat st = {0};
         if (stat("./ctest", &st) == -1) {
           mkdir("/ctest", 0755);
         }
         prepend(fileName, "ctest/");
-        readFile(fileName, size, socket_fd);
+        readFile(fileName, size, fd);
       } else if (size < 0) {
         printf("Client:File doesn't exist\n");
       }
