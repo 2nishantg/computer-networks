@@ -14,7 +14,7 @@
 
 
 #define BACKLOG 10
-#define BUFFER 16384
+#define BUFFER 1024
 #define min(a, b) (a < b) ? a : b
 #define miax(a, b) (a > b) ? a : b
 
@@ -76,7 +76,7 @@ int readFile(char *fileName, int size, FILE *fd) {
   while (rtotal < size) {
     bzero(buffer, sizeof(buffer));
     nread = readBuffer(buffer, sizeof(buffer), fd);
-    fwrite(buffer, 1, min(size - rtotal, sizeof(buffer)), filed);
+    fwrite(buffer, 1, min(size - rtotal, sizeof(buffer)), stdout);
     rtotal += nread;
   }
   fclose(filed);

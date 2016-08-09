@@ -66,10 +66,7 @@ int main(int argc, char *argv[]) {
         printf("Client:Filename sent: %s\n", fileName);
         printf("Client:File of size %d exists\nClient:Recieving\n", size);
         struct stat st = {0};
-        if (stat("./ctest", &st) == -1) {
-          mkdir("/ctest", 0755);
-        }
-        prepend(fileName, "ctest/");
+        //prepend(fileName, "ctest/");
         readFile(fileName, size, fd);
       } else if (size < 0) {
         printf("Client:Filename sent: %s\n", fileName);
