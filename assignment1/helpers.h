@@ -13,40 +13,42 @@
 #include <stdlib.h>
 
 
-#define BACKLOG 10
-#define BUFFER 1024
+#define BACKLOG 100 // no of connections by server
+#define BUFFER 1024 // buffer size used for transmitting data
 #define min(a, b) (a < b) ? a : b
 #define miax(a, b) (a > b) ? a : b
 
 
-
+// writes size bytes starting from buffer to fd
 int writeBuffer(char *buffer, size_t size, FILE *fd) {
-  int sent = 0, total_sent = 0;
-  while (total_sent < size) {
-    if ((sent = fwrite(buffer + total_sent, 1, size - total_sent, fd)) == 0) {
-      return -1;
-    }
-    total_sent += sent;
-  }
-  fflush(fd);
-  return total_sent;
-}
-
-int readBuffer(char *buffer, size_t size, FILE *fd) {
-  int received = 0, total_received = 0;
-  while (total_received < size) {
-    if ((received = fread(buffer + total_received, 1, size - total_received,
-                          fd)) == 0) {
+  int sent = 0, totalSent = 0;
+  while (totalSent < size) { // keep resending till data is not sent
+    if ((sent = fwrite(buffer + totalSent, 1, size - totalSent, fd)) == 0) { // if it is 0, then error has occured
       printf("Remote End closed\n");
       return -1;
     }
-    total_received += received;
+    totalSent += sent;
   }
-  fflush(fd);
-  return total_received;
+  fflush(fd); // needed if buffer size if large
+  return totalSent;
 }
 
+// reads size bytes into buffer from fd
+int readBuffer(char *buffer, size_t size, FILE *fd) {
+  int received = 0, totalReceived = 0;
+  while (totalReceived < size) {
+    if ((received = fread(buffer + totalReceived, 1, size - totalReceived,
+                          fd)) == 0) { // if it is 0, then error has occured
+      printf("Remote End closed\n");
+      return -1;
+    }
+    totalReceived += received;
+  }
+  fflush(fd); // needed if buffer size is large
+  return totalReceived;
+}
 
+//sends and integer that can be read by below function
 int writeInt(int num, FILE *fd) {
   char buffer[BUFFER];
   sprintf(buffer,"%d",num);
@@ -54,6 +56,7 @@ int writeInt(int num, FILE *fd) {
   return 0;
 }
 
+//complementry to above function
 int readInt(int *num, FILE *fd) {
   char buffer[BUFFER];
   bzero(buffer,BUFFER);
@@ -62,34 +65,31 @@ int readInt(int *num, FILE *fd) {
   return 0;
 }
 
-void prepend(char *s, const char *t) {
-  size_t len = strlen(t);
-  memmove(s + len, s, strlen(s) + 1);
-  for (size_t i = 0; i < len; ++i)
-    s[i] = t[i];
-}
+// readFile and writeFile always send BUFFER bytes, but in the last packet
+// only (size - received_till_now) are displayed
 
-int readFile(char *fileName, int size, FILE *fd) {
+//readFile sent using writeFile, and print it to stdout.
+int readFile(int size, FILE *fd) {
   int nread, rtotal = 0;
-  FILE *filed = fopen(fileName, "w");
   char buffer[BUFFER];
   while (rtotal < size) {
-    bzero(buffer, sizeof(buffer));
+    //bzero(buffer, sizeof(buffer));
     nread = readBuffer(buffer, sizeof(buffer), fd);
     fwrite(buffer, 1, min(size - rtotal, sizeof(buffer)), stdout);
     rtotal += nread;
   }
-  fclose(filed);
   return 0;
 }
 
+
+//writes File to a socket that can be read by readfile above
 int writeFile(char *fileName, size_t size, FILE *fd) {
   int nread, rtotal = 0;
   FILE *filed;
   char buffer[BUFFER];
   filed = fopen(fileName, "r");
   while (rtotal < size) {
-    bzero(buffer, sizeof(buffer));
+    //bzero(buffer, sizeof(buffer));
     nread = fread(buffer, 1, sizeof(buffer), filed);
     rtotal += nread;
     writeBuffer(buffer, sizeof(buffer), fd);
