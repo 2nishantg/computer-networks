@@ -14,7 +14,7 @@
 
 
 #define BACKLOG 10
-#define BUFFER 4096
+#define BUFFER 16384
 #define min(a, b) (a < b) ? a : b
 #define miax(a, b) (a > b) ? a : b
 
@@ -28,6 +28,7 @@ int writeBuffer(char *buffer, size_t size, FILE *fd) {
     }
     total_sent += sent;
   }
+  fflush(fd);
   return total_sent;
 }
 
@@ -41,6 +42,7 @@ int readBuffer(char *buffer, size_t size, FILE *fd) {
     }
     total_received += received;
   }
+  fflush(fd);
   return total_received;
 }
 

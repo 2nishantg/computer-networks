@@ -48,11 +48,11 @@ int main(int argc, char *argv[]) {
     exit(1);
   }
   FILE *fd = fdopen(socket_fd,"r+");
-  readBuffer(fileName,sizeof(fileName),fd);
+  readBuffer(fileName,BUFFER,fd);
   printf("%s",fileName);
 
   while (1) {
-    readBuffer(fileName,sizeof(fileName),fd);
+    readBuffer(fileName,BUFFER,fd);
     printf("%s",fileName);
     scanf("%s", fileName);
     if ((writeBuffer(fileName, BUFFER, fd)) == -1) {
