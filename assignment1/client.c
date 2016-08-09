@@ -18,7 +18,7 @@
 int main(int argc, char *argv[]) {
   struct sockaddr_in server_info;
   struct hostent *he;
-  int socket_fd, size;
+  int socket_fd, size, num;
   char fileName[BUFFER];
 
   if (argc != 3) {
@@ -60,9 +60,10 @@ int main(int argc, char *argv[]) {
       close(socket_fd);
       exit(1);
     } else {
-      printf("Client:Filename sent: %s\n", fileName);
-      readInt(&size, fd);
-      if (size >= 0) {
+      fflush(fd);
+      if((num = readInt(&size, fd)) == -1) break;
+      if (size > 0) {
+        printf("Client:Filename sent: %s\n", fileName);
         printf("Client:File of size %d exists\nClient:Recieving\n", size);
         struct stat st = {0};
         if (stat("./ctest", &st) == -1) {
@@ -71,7 +72,11 @@ int main(int argc, char *argv[]) {
         prepend(fileName, "ctest/");
         readFile(fileName, size, fd);
       } else if (size < 0) {
+        printf("Client:Filename sent: %s\n", fileName);
         printf("Client:File doesn't exist\n");
+      } else if (size == 0) {
+        fclose(fd);
+        break;
       }
     }
   }

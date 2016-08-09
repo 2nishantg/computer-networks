@@ -10,31 +10,15 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <stdlib.h>
+
 
 #define BACKLOG 10
-#define BUFFER 1024
+#define BUFFER 4096
 #define min(a, b) (a < b) ? a : b
 #define miax(a, b) (a > b) ? a : b
 
-int writeInt(int num, FILE *fd) {
-  int32_t conv = htonl(num);
-  fprintf(fd, "%d.4", conv);
-  return 0;
-}
 
-int readInt(int *num, FILE *fd) {
-  int32_t ret;
-  fscanf(fd, "%d.4", &ret);
-  *num = ntohl(ret);
-  return 0;
-}
-
-void prepend(char *s, const char *t) {
-  size_t len = strlen(t);
-  memmove(s + len, s, strlen(s) + 1);
-  for (size_t i = 0; i < len; ++i)
-    s[i] = t[i];
-}
 
 int writeBuffer(char *buffer, size_t size, FILE *fd) {
   int sent = 0, total_sent = 0;
@@ -52,11 +36,35 @@ int readBuffer(char *buffer, size_t size, FILE *fd) {
   while (total_received < size) {
     if ((received = fread(buffer + total_received, 1, size - total_received,
                           fd)) == 0) {
+      printf("Remote End closed\n");
       return -1;
     }
     total_received += received;
   }
   return total_received;
+}
+
+
+int writeInt(int num, FILE *fd) {
+  char buffer[BUFFER];
+  sprintf(buffer,"%d",num);
+  writeBuffer(buffer,BUFFER, fd);
+  return 0;
+}
+
+int readInt(int *num, FILE *fd) {
+  char buffer[BUFFER];
+  bzero(buffer,BUFFER);
+  readBuffer(buffer, BUFFER, fd);
+  *num = atoi(buffer);
+  return 0;
+}
+
+void prepend(char *s, const char *t) {
+  size_t len = strlen(t);
+  memmove(s + len, s, strlen(s) + 1);
+  for (size_t i = 0; i < len; ++i)
+    s[i] = t[i];
 }
 
 int readFile(char *fileName, int size, FILE *fd) {

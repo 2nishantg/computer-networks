@@ -76,9 +76,8 @@ int main(int argc, char *argv[]) {
       bzero(fileName, BUFFER);
       strcpy(fileName, filePrompt);
       writeBuffer(fileName, BUFFER, fd);
-      if ((num = readBuffer(fileName, BUFFER, fd)) == 0) {
-        perror("recv");
-        exit(1);
+      if ((num = readBuffer(fileName, BUFFER, fd)) == -1) {
+        break;
       } else if (num == -1) {
         printf("Connection closed\n");
         break;
