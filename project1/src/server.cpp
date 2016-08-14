@@ -25,9 +25,9 @@ enum requestType { GET, POST, HEAD, BAD };
 void startServer(char *);
 void serveClient(int);
 // (request, keepAliveStatus, fileName to serve)
-requestType parseHeaders(char *, int &, char *);
+requestType parseHeaders(char *, int &, char *, int &);
 int respondGET(char *, int);
-int respondPOST(char *, int);
+int respondPOST(char *, int, int);
 int respondHEAD(char *, int);
 
 
@@ -117,7 +117,6 @@ void startServer(char *port) {
   setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
   freeaddrinfo(res);
 
-  // listen for incoming connections
   if (listen(listenfd, atoi(port)) != 0) {
     perror("listen() error");
     exit(1);
@@ -167,19 +166,26 @@ int respondHEAD(char *path, int n) {
     snprintf(tempBuffer, BYTES, "Content-Length: %d\n", size);
     send(clients[n], tempBuffer, strlen(tempBuffer), 0);
     send(clients[n], "Connection: keep-alive\n\n", 24, 0);
-    // while ((bytes_read = read(fd, data_to_send, BYTES)) > 0)
-    //   write(clients[n], data_to_send, bytes_read);
   } else
     write(clients[n], "HTTP/1.0 404 Not Found\n", 23); // FILE NOT FOUND
   return 0;
 }
 
 
-int respondPOST(char *path, int n) { return 1; }
+int respondPOST(char *path, int n, int postPayloadLength) {
+  char *postPayload, tempBuffer[BYTES];
+  postPayload = strtok(NULL,"");
+  postPayload[postPayloadLength] = 0;
+  printf("\"%s\" of length %d to be written to %s\n",postPayload, (int)strlen(postPayload), path);
+  send(clients[n], "HTTP/1.1 200 OK\n", 16, 0);
+  snprintf(tempBuffer, BYTES, "Content-Length: %d\n\n", 0);
+  send(clients[n], tempBuffer, strlen(tempBuffer)+1, 0);
+  return 1;
+}
 
 void serveClient(int n) {
   char mesg[1 << 10], path[1 << 10];
-  int rcvd, idx = 0, keepAliveStatus;
+  int rcvd, idx = 0, keepAliveStatus, payloadLength;
 
   memset((void *)mesg, 0, 1 << 10);
 
@@ -191,15 +197,15 @@ void serveClient(int n) {
       fprintf(stderr, "Client disconnected upexpectedly.\n");
     else // message received
     {
-      printf("%s", mesg);
-      requestType currReq = parseHeaders(mesg, keepAliveStatus, path);
+      //     printf("%s", mesg);
+      requestType currReq = parseHeaders(mesg, keepAliveStatus, path, payloadLength);
       if (currReq == GET)
         respondGET(path, n);
       else if (currReq == HEAD)
         respondHEAD(path, n);
       else if (currReq == POST)
-        respondPOST(path, n);
-      if (keepAliveStatus)
+        respondPOST(path, n, payloadLength);
+      if (!keepAliveStatus)
         break;
     }
   }
@@ -207,67 +213,34 @@ void serveClient(int n) {
   close(clients[n]);
 }
 
-requestType parseHeaders(char *mesg, int &keepAliveStatus, char *path) {
+requestType parseHeaders(char *mesg, int &keepAliveStatus, char *path, int &payloadLength) {
   char *reqline[3], *headerLine;
+  requestType curRequest;
   keepAliveStatus = 1;
   reqline[0] = strtok(mesg, " \t");
-  if (strncmp(reqline[0], "GET\0", 4) == 0) {
-    reqline[1] = strtok(NULL, " \t");
-    reqline[2] = strtok(NULL, "\n");
-    if (strncmp(reqline[2], "HTTP/1.1", 8) != 0) {
-      return BAD;
-    } else {
-      if (strncmp(reqline[1], "/\0", 2) == 0)
-        reqline[1] = (char *)"/index.html";
-      strcpy(path, ROOT);
-      strcpy(&path[strlen(ROOT)], reqline[1]);
-    }
-    headerLine = strtok(NULL, "\n");
-    while (headerLine != NULL) {
-      if (strcmp(headerLine, "Connection: Close") ||
-          strcmp(headerLine, "Connection: close"))
-        keepAliveStatus = 0;
-      headerLine = strtok(NULL, "\n");
-    }
-    return GET;
-  } else if (strncmp(reqline[0], "HEAD\0", 5) == 0) {
-    reqline[1] = strtok(NULL, " \t");
-    reqline[2] = strtok(NULL, "\n");
-    if (strncmp(reqline[2], "HTTP/1.1", 8) != 0) {
-      return BAD;
-    } else {
-      if (strncmp(reqline[1], "/\0", 2) == 0)
-        reqline[1] = (char *)"/index.html";
-      strcpy(path, ROOT);
-      strcpy(&path[strlen(ROOT)], reqline[1]);
-    }
-    headerLine = strtok(NULL, "\n");
-    while (headerLine != NULL) {
-      if (strcmp(headerLine, "Connection: Close") ||
-          strcmp(headerLine, "Connection: close"))
-        keepAliveStatus = 0;
-      headerLine = strtok(NULL, "\n");
-    }
-    return HEAD;
-  } else if (strncmp(reqline[0], "POST\0", 5) == 0) {
-    reqline[1] = strtok(NULL, " \t");
-    reqline[2] = strtok(NULL, "\n");
-    if (strncmp(reqline[2], "HTTP/1.1", 8) != 0) {
-      return BAD;
-    } else {
-      if (strncmp(reqline[1], "/\0", 2) == 0)
-        reqline[1] = (char *)"/index.html";
-      strcpy(path, ROOT);
-      strcpy(&path[strlen(ROOT)], reqline[1]);
-    }
-    headerLine = strtok(NULL, "\n");
-    while (headerLine != NULL) {
-      if (strcmp(headerLine, "Connection: Close") ||
-          strcmp(headerLine, "Connection: close"))
-        keepAliveStatus = 0;
-      headerLine = strtok(NULL, "\n");
-    }
-    return POST;
+  if (strncmp(reqline[0], "GET\0", 4) == 0) curRequest = GET;
+  else if (strncmp(reqline[0], "HEAD\0", 5) == 0) curRequest = HEAD;
+  else if (strncmp(reqline[0], "POST\0", 5) == 0) curRequest = POST;
+  reqline[1] = strtok(NULL, " \t");
+  reqline[2] = strtok(NULL, "\n");
+  if (strncmp(reqline[2], "HTTP/1.1", 8) != 0) {
+    return BAD;
+  } else {
+    if (strncmp(reqline[1], "/\0", 2) == 0)
+      reqline[1] = (char *)"/index.html";
+    strcpy(path, ROOT);
+    strcpy(&path[strlen(ROOT)], reqline[1]);
   }
-  return BAD;
+  headerLine = strtok(NULL, "\n");
+  while (strlen(headerLine) > 1) {
+    printf("%s\n", headerLine);
+    if (strcmp(headerLine, "Connection: Close") ||
+        strcmp(headerLine, "Connection: close"))
+      keepAliveStatus = 0;
+    if (strncmp(headerLine, "Content-Length", 14) == 0) {
+        payloadLength = atoi(headerLine+16);
+      }
+    headerLine = strtok(NULL, "\n");
+  }
+  return curRequest;
 }
