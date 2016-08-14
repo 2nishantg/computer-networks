@@ -14,9 +14,13 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <assert.h>
+
 
 #define CONNMAX 1000
 #define BYTES 1024
+#define min(a, b)  (a < b) ? a : b
 
 char *ROOT = getenv("PWD"), PORT[8];
 int listenfd;
@@ -25,11 +29,11 @@ enum requestType { GET, POST, HEAD, BAD };
 void startServer(char *);
 void serveClient(int);
 requestType parseHeaders(char *, int &, char *, int &);
-int respondGET(char *, int);
+int respondHG(char *, int, requestType);
 int respondPOST(char *, int, int);
-int respondHEAD(char *, int);
 int sendCommonHeaders(int, int);
 int sendNotFound(int, requestType);
+char *generateDirectoryList(char *, int &);
 
 int parseArgs(int argc, char *argv[]) {
   char c;
@@ -142,43 +146,84 @@ int sendNotFound(int clientSock, requestType curRequest) {
   return 0;
 }
 
-int respondGET(char *path, int clientSock) {
-  int fd, bytes_read;
-  char data_to_send[BYTES];
+char* generateDirectoryList(char *path, int &size) {
+  DIR *dir;
+  int idx = 0, written;
+  char* retVal = (char *)malloc(99999);
+  struct dirent *ent;
+  if ((dir = opendir (path)) != NULL) {
+    /* print all the files and directories within directory */
+    written = sprintf(retVal+idx,"<html><body><ul>\n");
+    idx += written;
+    while ((ent = readdir (dir)) != NULL) {
+      written = sprintf(retVal+idx,"<li><a href=\"%s/%s\">%s</a></li>\n", path + strlen(ROOT),  ent->d_name, ent->d_name);
+      idx += written;
+    }
+    written = sprintf(retVal+idx,"</ul></body></html>\n");
+    idx += written;
+    size = strlen(retVal);
+    closedir(dir);
+    return retVal;
+  } else {
+    /* could not open directory */
+    perror ("Could not open directory");
+    return NULL;
+  }
+}
+
+int writeBuffer(int clientSock, char *buffer, int size) {
+  int totalWritten = 0, written = 0;
+  while(totalWritten < size) {
+    written = send(clientSock, buffer + totalWritten, size - totalWritten, 0);
+    if(written <= 0 ) return -1;
+    totalWritten += written;
+  }
+  return 0;
+}
+
+int respondHG(char *path, int clientSock, requestType curRequest) {
+  int fd, bytes_read, isDirectory, size;
+  char data_to_send[BYTES], *directoryList;
   struct stat statsBuf;
   printf("file: %s\n", path);
-  if ((fd = open(path, O_RDONLY)) != -1) {
-    stat(path, &statsBuf); // find file size
-    int size = (int)statsBuf.st_size;
+
+  if (stat(path, &statsBuf) == 0) {
+    if( statsBuf.st_mode & S_IFDIR ) {
+      isDirectory = 1;
+      directoryList = generateDirectoryList(path, size);
+    } else size = (int)statsBuf.st_size;
     sendCommonHeaders(clientSock, size);
-    while ((bytes_read = read(fd, data_to_send, BYTES)) > 0)
-      write(clientSock, data_to_send, bytes_read);
+    if(curRequest == GET) {
+      if(isDirectory) writeBuffer(clientSock, directoryList, size);
+      else {
+        fd = open(path, O_RDONLY);
+        while ((bytes_read = read(fd, data_to_send, BYTES)) > 0)
+          write(clientSock, data_to_send, bytes_read);
+      }
+    }
   } else {
-    sendNotFound(clientSock, GET);
+    sendNotFound(clientSock, curRequest);
   }
   return 0;
 }
 
-int respondHEAD(char *path, int clientSock) {
-  int fd;
-  struct stat statsBuf;
-  printf("\nFile requested : %s\n", path);
-  if ((fd = open(path, O_RDONLY)) != -1) {
-    stat(path, &statsBuf); // find file size
-    int size = (int)statsBuf.st_size;
-    sendCommonHeaders(clientSock, size);
-  } else {
-    sendNotFound(clientSock, HEAD);
-  }
-  return 0;
-}
 
 int respondPOST(char *path, int clientSock, int postPayloadLength) {
-  char *postPayload, tempBuffer[BYTES];
-  postPayload = strtok(NULL, "");
-  postPayload[postPayloadLength] = 0;
-  printf("\"%s\" of length %d to be written to %s\n", postPayload,
-         (int)strlen(postPayload), path);
+  char postPayload[postPayloadLength], *initialPayload, tempBuffer[BYTES];
+  initialPayload = strtok(NULL, "");
+  if(initialPayload == NULL) assert("strtok null");
+  int readTillNow = strlen(initialPayload), recieved;
+  FILE *fd = fopen(path, "w");
+  strcpy(postPayload, initialPayload);
+  while(readTillNow < postPayloadLength) {
+    recieved = recv(clientSock, tempBuffer, min(BYTES, postPayloadLength - readTillNow), 0);
+    strncpy(postPayload + readTillNow, tempBuffer, min(postPayloadLength - readTillNow, recieved));
+    printf("readTillNow = %d, recieved = %d \n", readTillNow, recieved);
+    readTillNow += recieved;
+  }
+  printf("%d written \n", fwrite(postPayload,1,postPayloadLength, fd));
+  fflush(fd);
+  fclose(fd);
   send(clientSock, "HTTP/1.1 200 OK\n", 16, 0);
   snprintf(tempBuffer, BYTES, "Content-Length: %d\n\n", 0);
   send(clientSock, tempBuffer, strlen(tempBuffer) + 1, 0);
@@ -189,19 +234,16 @@ void serveClient(int clientSock) {
   char mesg[BYTES], path[BYTES];
   int rcvd, keepAliveStatus = 0, payloadLength;
   memset((void *)mesg, 0, BYTES);
-  while ((rcvd = recv(clientSock, mesg, 1 << 10, 0)) > 0) {
+  while ((rcvd = recv(clientSock, mesg, BYTES - 1, 0)) > 0) {
     if (rcvd < 0) // receive error
       fprintf(stderr, ("recv() error\n"));
     else if (rcvd == 0) // receive socket closed
       fprintf(stderr, "Client disconnected upexpectedly.\n");
-    else // message received
-    {
+    else {
       requestType currReq =
           parseHeaders(mesg, keepAliveStatus, path, payloadLength);
-      if (currReq == GET)
-        respondGET(path, clientSock);
-      else if (currReq == HEAD)
-        respondHEAD(path, clientSock);
+      if (currReq == GET || currReq == HEAD)
+        respondHG(path, clientSock, currReq);
       else if (currReq == POST)
         respondPOST(path, clientSock, payloadLength);
       if (keepAliveStatus)
