@@ -143,8 +143,14 @@ int respondGET(char *path, int n) {
     send(clients[n], "Connection: keep-alive\n\n", 24, 0);
     while ((bytes_read = read(fd, data_to_send, BYTES)) > 0)
       write(clients[n], data_to_send, bytes_read);
-  } else
+  } else {
     write(clients[n], "HTTP/1.0 404 Not Found\n", 23); // FILE NOT FOUND
+    char *errMesg = (char *)"Not Found\n";
+    snprintf(tempBuffer, BYTES, "Content-Length: %d\n", (int)strlen(errMesg));
+    send(clients[n], tempBuffer, strlen(tempBuffer), 0);
+    send(clients[n], "Connection: keep-alive\n\n", 24, 0);
+    send(clients[n], errMesg, strlen(errMesg), 0);
+  }
   return 0;
 }
 
@@ -166,8 +172,12 @@ int respondHEAD(char *path, int n) {
     snprintf(tempBuffer, BYTES, "Content-Length: %d\n", size);
     send(clients[n], tempBuffer, strlen(tempBuffer), 0);
     send(clients[n], "Connection: keep-alive\n\n", 24, 0);
-  } else
-    write(clients[n], "HTTP/1.0 404 Not Found\n", 23); // FILE NOT FOUND
+  } else {
+    send(clients[n], "HTTP/1.0 404 Not Found\n", 23, 0); // FILE NOT FOUND
+    snprintf(tempBuffer, BYTES, "Content-Length: %d\n", 0);
+    send(clients[n], tempBuffer, strlen(tempBuffer), 0);
+    send(clients[n], "Connection: keep-alive\n\n", 24, 0);
+  }
   return 0;
 }
 
@@ -178,14 +188,16 @@ int respondPOST(char *path, int n, int postPayloadLength) {
   postPayload[postPayloadLength] = 0;
   printf("\"%s\" of length %d to be written to %s\n",postPayload, (int)strlen(postPayload), path);
   send(clients[n], "HTTP/1.1 200 OK\n", 16, 0);
-  snprintf(tempBuffer, BYTES, "Content-Length: %d\n\n", 0);
+  snprintf(tempBuffer, BYTES, "Content-Length: %d\n\n", 9);
   send(clients[n], tempBuffer, strlen(tempBuffer)+1, 0);
+  snprintf(tempBuffer, BYTES, "Not Found");
+  send(clients[n], tempBuffer, strlen(tempBuffer), 0);
   return 1;
 }
 
 void serveClient(int n) {
   char mesg[1 << 10], path[1 << 10];
-  int rcvd, idx = 0, keepAliveStatus, payloadLength;
+  int rcvd, idx = 0, keepAliveStatus = 0, payloadLength;
 
   memset((void *)mesg, 0, 1 << 10);
 
@@ -197,7 +209,6 @@ void serveClient(int n) {
       fprintf(stderr, "Client disconnected upexpectedly.\n");
     else // message received
     {
-      //     printf("%s", mesg);
       requestType currReq = parseHeaders(mesg, keepAliveStatus, path, payloadLength);
       if (currReq == GET)
         respondGET(path, n);
@@ -205,18 +216,17 @@ void serveClient(int n) {
         respondHEAD(path, n);
       else if (currReq == POST)
         respondPOST(path, n, payloadLength);
-      if (!keepAliveStatus)
-        break;
+      if(keepAliveStatus) break;
     }
   }
-  clients[n] = -1;
   close(clients[n]);
+  clients[n] = -1;
 }
 
 requestType parseHeaders(char *mesg, int &keepAliveStatus, char *path, int &payloadLength) {
   char *reqline[3], *headerLine;
   requestType curRequest;
-  keepAliveStatus = 1;
+  keepAliveStatus = 0;
   reqline[0] = strtok(mesg, " \t");
   if (strncmp(reqline[0], "GET\0", 4) == 0) curRequest = GET;
   else if (strncmp(reqline[0], "HEAD\0", 5) == 0) curRequest = HEAD;
@@ -234,9 +244,9 @@ requestType parseHeaders(char *mesg, int &keepAliveStatus, char *path, int &payl
   headerLine = strtok(NULL, "\n");
   while (strlen(headerLine) > 1) {
     printf("%s\n", headerLine);
-    if (strcmp(headerLine, "Connection: Close") ||
-        strcmp(headerLine, "Connection: close"))
-      keepAliveStatus = 0;
+    if ((strncmp(headerLine, "Connection: Close", 17) == 0) ||
+        (strncmp(headerLine, "Connection: close", 17) == 0))
+      keepAliveStatus = 1;
     if (strncmp(headerLine, "Content-Length", 14) == 0) {
         payloadLength = atoi(headerLine+16);
       }
