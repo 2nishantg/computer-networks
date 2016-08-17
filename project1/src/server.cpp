@@ -19,7 +19,7 @@
 
 
 #define CONNMAX 1000
-#define BYTES 1024
+#define BYTES 8096
 #define min(a, b)  (a < b) ? a : b
 
 char *ROOT = getenv("PWD"), PORT[8];
@@ -137,7 +137,7 @@ int sendCommonHeaders(int clientSock, int contentLength) {
 int sendNotFound(int clientSock, requestType curRequest) {
   char tempBuffer[1024];
   write(clientSock, "HTTP/1.0 404 Not Found\n", 23); // FILE NOT FOUND
-  char *errMesg = (char *)"Not Found\n";
+  char *errMesg = (char *)"<h1>404: Not Found</h1>";
   snprintf(tempBuffer, BYTES, "Content-Length: %d\n", (int)strlen(errMesg));
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   send(clientSock, "Connection: keep-alive\n\n", 24, 0);
@@ -211,22 +211,23 @@ int respondHG(char *path, int clientSock, requestType curRequest) {
 int respondPOST(char *path, int clientSock, int postPayloadLength) {
   char postPayload[postPayloadLength], *initialPayload, tempBuffer[BYTES];
   initialPayload = strtok(NULL, "");
-  if(initialPayload == NULL) assert("strtok null");
   int readTillNow = strlen(initialPayload), recieved;
   FILE *fd = fopen(path, "w");
   strcpy(postPayload, initialPayload);
   while(readTillNow < postPayloadLength) {
     recieved = recv(clientSock, tempBuffer, min(BYTES, postPayloadLength - readTillNow), 0);
     strncpy(postPayload + readTillNow, tempBuffer, min(postPayloadLength - readTillNow, recieved));
-    printf("readTillNow = %d, recieved = %d \n", readTillNow, recieved);
+    //    printf("readTillNow = %d, recieved = %d \n", readTillNow, recieved);
     readTillNow += recieved;
   }
-  printf("%d written \n", fwrite(postPayload,1,postPayloadLength, fd));
+  fwrite(postPayload,1,postPayloadLength, fd);
   fflush(fd);
   fclose(fd);
+  char *successMesg = (char *)"<h1>Content written Succesfully</h1>";
   send(clientSock, "HTTP/1.1 200 OK\n", 16, 0);
-  snprintf(tempBuffer, BYTES, "Content-Length: %d\n\n", 0);
-  send(clientSock, tempBuffer, strlen(tempBuffer) + 1, 0);
+  snprintf(tempBuffer, BYTES, "Content-Length: %d\n\n", (int)strlen(successMesg));
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
+  send(clientSock, successMesg, strlen(successMesg), 0);
   return 1;
 }
 
@@ -267,7 +268,8 @@ requestType parseHeaders(char *mesg, int &keepAliveStatus, char *path,
     curRequest = POST;
   reqline[1] = strtok(NULL, " \t");
   reqline[2] = strtok(NULL, "\n");
-  if (strncmp(reqline[2], "HTTP/1.1", 8) != 0) {
+  if ((strncmp(reqline[2], "HTTP/1.1", 8) != 0) &&
+      (strncmp(reqline[2], "HTTP/1.0", 8) != 0)) {
     return BAD;
   } else {
     if (strncmp(reqline[1], "/\0", 2) == 0) {
