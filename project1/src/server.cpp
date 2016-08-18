@@ -29,9 +29,9 @@ enum requestType { GET, POST, HEAD, BAD };
 void startServer(char *);
 void serveClient(int);
 requestType parseHeaders(char *, int &, char *, int &);
-int respondHG(char *, int, requestType);
-int respondPOST(char *, int, int);
-int sendCommonHeaders(int, int);
+int respondHG(char *, int, requestType, int);
+int respondPOST(char *, int, int, int);
+int sendCommonHeaders(int, int, int);
 int sendNotFound(int, requestType);
 char *generateDirectoryList(char *, int &);
 
@@ -119,18 +119,20 @@ void startServer(char *port) {
   }
 }
 
-int sendCommonHeaders(int clientSock, int contentLength) {
+int sendCommonHeaders(int clientSock, int contentLength, int keepAliveStatus) {
   char tempBuffer[BYTES], dateBuffer[BYTES];
-  send(clientSock, "HTTP/1.1 200 OK\n", 16, 0);
-  send(clientSock, "Server: Alchemist\n", 18, 0);
+  send(clientSock, "HTTP/1.1 200 OK\r\n", 17, 0);
+  send(clientSock, "Server: Alchemist\r\n", 19, 0);
   time_t now = time(0);
   struct tm tm = *gmtime(&now);
   strftime(dateBuffer, sizeof(dateBuffer), "%a, %d %b %Y %H:%M:%S %Z", &tm);
-  snprintf(tempBuffer, sizeof(tempBuffer), "Date: %s\n", dateBuffer);
+  snprintf(tempBuffer, sizeof(tempBuffer), "Date: %s\r\n", dateBuffer);
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
-  snprintf(tempBuffer, BYTES, "Content-Length: %d\n", contentLength);
+  snprintf(tempBuffer, BYTES, "Content-Length: %d\r\n", contentLength);
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
-  send(clientSock, "Connection: keep-alive\n\n", 24, 0);
+  if(keepAliveStatus == 1)   snprintf(tempBuffer, BYTES, "Connection: Close\r\n\r\n");
+  else snprintf(tempBuffer, BYTES, "Connection: keep-alive \r\n\r\n");
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   return 0;
 }
 
@@ -181,7 +183,7 @@ int writeBuffer(int clientSock, char *buffer, int size) {
   return 0;
 }
 
-int respondHG(char *path, int clientSock, requestType curRequest) {
+int respondHG(char *path, int clientSock, requestType curRequest, int keepAliveStatus) {
   int fd, bytes_read, isDirectory, size;
   char data_to_send[BYTES], *directoryList;
   struct stat statsBuf;
@@ -192,7 +194,7 @@ int respondHG(char *path, int clientSock, requestType curRequest) {
       isDirectory = 1;
       directoryList = generateDirectoryList(path, size);
     } else size = (int)statsBuf.st_size;
-    sendCommonHeaders(clientSock, size);
+    sendCommonHeaders(clientSock, size, keepAliveStatus);
     if(curRequest == GET) {
       if(isDirectory) writeBuffer(clientSock, directoryList, size);
       else {
@@ -208,7 +210,7 @@ int respondHG(char *path, int clientSock, requestType curRequest) {
 }
 
 
-int respondPOST(char *path, int clientSock, int postPayloadLength) {
+int respondPOST(char *path, int clientSock, int postPayloadLength, int keepAliveStatus) {
   char postPayload[postPayloadLength], *initialPayload, tempBuffer[BYTES];
   initialPayload = strtok(NULL, "");
   int readTillNow = strlen(initialPayload), recieved;
@@ -217,15 +219,19 @@ int respondPOST(char *path, int clientSock, int postPayloadLength) {
   while(readTillNow < postPayloadLength) {
     recieved = recv(clientSock, tempBuffer, min(BYTES, postPayloadLength - readTillNow), 0);
     strncpy(postPayload + readTillNow, tempBuffer, min(postPayloadLength - readTillNow, recieved));
-    //    printf("readTillNow = %d, recieved = %d \n", readTillNow, recieved);
     readTillNow += recieved;
   }
   fwrite(postPayload,1,postPayloadLength, fd);
   fflush(fd);
   fclose(fd);
   char *successMesg = (char *)"<h1>Content written Succesfully</h1>";
-  send(clientSock, "HTTP/1.1 200 OK\n", 16, 0);
-  snprintf(tempBuffer, BYTES, "Content-Length: %d\n\n", (int)strlen(successMesg));
+  send(clientSock, "HTTP/1.1 200 OK\r\n", 17, 0);
+  snprintf(tempBuffer, BYTES, "Content-Type: text/html\r\n");
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
+  snprintf(tempBuffer, BYTES, "Content-Length: %d\r\n", (int)strlen(successMesg));
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
+  if(keepAliveStatus == 1)   snprintf(tempBuffer, BYTES, "Connection: Close\r\n\r\n");
+  else snprintf(tempBuffer, BYTES, "Connection: keep-alive \r\n\r\n");
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   send(clientSock, successMesg, strlen(successMesg), 0);
   return 1;
@@ -233,24 +239,21 @@ int respondPOST(char *path, int clientSock, int postPayloadLength) {
 
 void serveClient(int clientSock) {
   char mesg[BYTES], path[BYTES];
-  int rcvd, keepAliveStatus = 0, payloadLength;
+  int rcvd, keepAliveStatus = 0, payloadLength, idx = 1;
   memset((void *)mesg, 0, BYTES);
+  fprintf(stderr, "Connected to client %d\n", clientSock);
   while ((rcvd = recv(clientSock, mesg, BYTES - 1, 0)) > 0) {
-    if (rcvd < 0) // receive error
-      fprintf(stderr, ("recv() error\n"));
-    else if (rcvd == 0) // receive socket closed
-      fprintf(stderr, "Client disconnected upexpectedly.\n");
-    else {
+    fprintf(stderr, "Request %d from Client %d\n", idx++, clientSock);
       requestType currReq =
           parseHeaders(mesg, keepAliveStatus, path, payloadLength);
       if (currReq == GET || currReq == HEAD)
-        respondHG(path, clientSock, currReq);
+        respondHG(path, clientSock, currReq, keepAliveStatus);
       else if (currReq == POST)
-        respondPOST(path, clientSock, payloadLength);
+        respondPOST(path, clientSock, payloadLength, keepAliveStatus);
       if (keepAliveStatus)
         break;
-    }
   }
+  fprintf(stderr, "Closed Client\n");
   close(clientSock);
 }
 
@@ -260,6 +263,7 @@ requestType parseHeaders(char *mesg, int &keepAliveStatus, char *path,
   requestType curRequest;
   keepAliveStatus = 0;
   reqline[0] = strtok(mesg, " \t");
+  printf("%s ",reqline[0]);
   if (strncmp(reqline[0], "GET\0", 4) == 0)
     curRequest = GET;
   else if (strncmp(reqline[0], "HEAD\0", 5) == 0)
@@ -268,6 +272,7 @@ requestType parseHeaders(char *mesg, int &keepAliveStatus, char *path,
     curRequest = POST;
   reqline[1] = strtok(NULL, " \t");
   reqline[2] = strtok(NULL, "\n");
+  printf("%s %s\n ",reqline[1], reqline[2]);
   if ((strncmp(reqline[2], "HTTP/1.1", 8) != 0) &&
       (strncmp(reqline[2], "HTTP/1.0", 8) != 0)) {
     return BAD;
