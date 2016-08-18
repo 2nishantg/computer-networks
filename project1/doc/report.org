@@ -1,0 +1,288 @@
+#+TITLE:     CS425 - Project 1 Report
+#+AUTHOR:    Nishant Gupta, nishgu@iitk.ac.in, 13447
+#+DESCRIPTION: HTTP1.1 compliant file server
+#+LATEX_CMD: xelatex
+#+OPTIONS: toc:nil
+
+
+#+LATEX_HEADER: \usepackage{xltxtra}
+#+LATEX_HEADER: \usepackage{fontspec} %Font package
+#+LATEX_HEADER: \usepackage{xunicode}
+#+LATEX_HEADER: \setmainfont[Mapping=tex-text]{Minion Pro}
+#+LATEX_HEADER: \setsansfont[Mapping=tex-text]{Myriad Pro}
+#+LATEX_HEADER: \setmonofont{PragmataPro}
+#+LATEX_HEADER: \usepackage[top=0.25in, left=0.45in, right=0.75in, bottom=0.25in]{geometry}
+
+
+
+* Implemented Options
+** Mandatory
+- Supports GET method
+- Supports Persistent Connections and multiple clients
+- Provides Content-length and content-Type fields in response
+- Provides appropriate Status-Code and Response-Phrase values in response to errors.
+** Optional
+- Allow the server port and document base directory to be initialized at start up 
+- Include the Date and Server fields in the Response message header 
+- Implemented the HEAD method 
+- Implemented the POST method 
+- Reply with a directory listing if a directory is the requested resource 
+- Reply with a hyperlinked directory listing if a directory is the requested resource
+
+\newpage
+* Optional feature details
+** Server port and root directory initialization :
+You can optionally give port with ~-p~ and root with ~-r~. Default values are: ~PORT=9576~ and ~ROOT=./test~, make sure ~test~ directory exists. 
+
+\noindent eg: ~bin/server -p 9577 -r test/~
+** Date and Server fields :
+Server is sent as Alchemist and Date is sent in the format "Thu, 18 Aug 2016 18:52:47 GMT".
+** POST Method :
+In, POST request, message-body is written to ~abs-path~ of URI relative to root directory.
+
+\noindent See Appendix
+** Hyperlinked directory :
+A clickable list of all the filenames is is returned on GET request for a directory. Spaces in filenames and directories are not supported.
+ 
+\newpage
+* Test results
+** Multiple Clients and Persistent connections
+See [[*Multiple clients and persistent connections][Multiple clients and persistent connections of Appendix]] for Verification image and log.
+It can be seen in chrome network inspector image that multiple requests complete at almost same time. This means that server supports multiple connections.  \\
+Also Stderr log of opening ~index.html~ in firefox shows that multiple requests were served to same client, which proves that persistent 
+connections work and the clients requests are intermingled, which proves that multiple simultaneous connections work.
+
+** Webpage provided with project 
+Google Chrome Version 52.0.2743.116 (64-bit) was used for testing in this part
+*** GET and Directory listing
+These are [[*GET Request :][Screenshots of Google Chrome]] showing index.html and directory listing working correctly.
+
+*** POST request
+After submitting form on ~post_test.html~, following is the content of ~test/post_test_file.txt~
+#+BEGIN_SRC text 
+TextEntry_1=Hola&TextEntry_2=This+is+some+text+for+testing+the+POST+method.%0D%0A&Item=Item_1
+#+END_SRC
+** Testing using command line
+httpie : A CLI HTTP client was used.
+*** POST request 
+I generated a random file of 10^6 bytes and sent it using ~httpie~, and compared the saved file to original file. They were same. 
+ [[*POST request :][POST request]] section of Appendix verifies that.
+*** GET request
+I made a GET request using httpie and it ran succesfully as can be seen in [[*GET Request :][GET Request]] section of Appendix.
+*** HEAD request
+I made a HEAD request using  httpie and it ran succesfully as can be seen in [[*HEAD request :][HEAD request]] section of Appendix.
+
+** Status Codes
+I made different types of requests that would yield different status codes using httpie. They can be seen in [[*Status Codes :][Status Codes]] section of Appendix.
+- I recognize ~GET, HEAD, POST, PUT, OPTIONS, CONNECT, DELETE~. Only three of them are implemented, others give ~501 : Not implemented~
+- If anything other than these seven comes, it is BAD request and ~400 : Bad Request~ is returned. Bad request is also returned if any protocol other than HTTP/1.0 or HTTP/1.1 is requested 
+- I have put my entire parser in a try catch block, if parser fails I send ~500 : Internal Server Error~ in catch block.
+- If Parser succeeds, I process corresponding request and then ~404~ or ~200~ is sent by corresponding method. 
+
+** Summary
+- I have not supported spaces and other special characters in resources requested, so it will give 404.
+- Also, in hyperlinked directory listing, link will be wrong if there are spaces or other special characters in the name. 
+- Everything else is working as it should.
+- I had no way to check Internal Server Error.
+- All the other Status codes are working as they should.
+- Multiple clients and persistent connections are working correctly, I have not implemented timeout.
+\newpage
+* Appendix 
+
+** Multiple clients and persistent connections
+<<multiPersist>>
+#+ATTR_LATEX: :width 18cm
+[[./multipleclients.png]]
+
+
+<<firefoxStderr>>
+\noindent Following is the condensed stderr log of opening ~index.html~ in firefox.
+
+#+BEGIN_SRC text
+Connected to client 6
+Request 1 from Client 5
+Request 2 from Client 5
+Connected to client 6
+Connected to client 7
+Connected to client 8
+Connected to client 9
+Connected to client 10
+Request 1 from Client 10
+Request 1 from Client 9
+Request 1 from Client 8
+Request 1 from Client 6
+Request 1 from Client 7
+Request 3 from Client 5
+Request 2 from Client 8
+Request 2 from Client 10
+Request 2 from Client 9
+Request 2 from Client 7
+Request 2 from Client 6
+Request 3 from Client 6
+Request 4 from Client 5
+Request 3 from Client 8
+Request 4 from Client 6
+Request 5 from Client 5
+Request 5 from Client 6
+Closed Client
+Closed Client
+Closed Client
+Closed Client
+Closed Client
+Closed Client
+
+#+END_SRC
+
+** GET Request :
+GET request made using Chrome
+
+#+ATTR_LATEX: :width 9cm
+[[./index1.png]]
+#+ATTR_LATEX: :width 9cm
+[[./index2.png]] \\
+#+ATTR_LATEX: :width 9cm
+[[./directorylist.png]]
+#+ATTR_LATEX: :width 9cm
+[[./index3.png]]
+
+\noindent GET request made using httpie
+#+BEGIN_SRC bash
+ ~/c/n/project1 $ http GET  :9577/post_test_file.txt Connection:close -v
+GET /post_test_file.txt HTTP/1.1
+Accept: */*
+Accept-Encoding: gzip, deflate
+Connection: close
+Host: localhost:9577
+User-Agent: HTTPie/0.9.4
+
+
+
+HTTP/1.1 200 OK
+Connection: Close
+Content-Length: 93
+Content-Type: text/plain
+Date: Thu, 18 Aug 2016 18:52:47 GMT
+Server: Alchemist
+
+TextEntry_1=Hola&TextEntry_2=This+is+some+text+for+testing+the+POST+method.%0D%0A&Item=Item_1
+
+#+END_SRC
+
+\newpage
+** POST request :
+<<POSThttpie>>
+\noindent POST Request made using httpie 
+
+#+BEGIN_SRC bash
+ ~/c/n/project1 $ base64 /dev/urandom | head -c 1000000 >! file.txt
+ ~/c/n/project1 $ cat file.txt | http POST :9577/file.txt -p=Hhb
+POST /file.txt HTTP/1.1
+Accept: application/json
+Accept-Encoding: gzip, deflate
+Connection: keep-alive
+Content-Length: 1000000
+Content-Type: application/json
+Host: localhost:9577
+User-Agent: HTTPie/0.9.4
+
+HTTP/1.1 200 OK
+Content-Length: 36
+Content-Type: text/html
+
+<h1>Content written Succesfully</h1>
+
+ ~/c/n/project1 $ diff file.txt test/file.txt
+ ~/c/n/project1 $
+#+END_SRC
+
+** HEAD request :
+<<head>>
+HEAD request made using httpie
+#+BEGIN_SRC text
+ ~/c/n/project1 $ http HEAD  :9577/ Connection:close -v
+HEAD / HTTP/1.1
+Accept: */*
+Accept-Encoding: gzip, deflate
+Connection: close
+Host: localhost:9577
+User-Agent: HTTPie/0.9.4
+
+
+
+HTTP/1.1 200 OK
+Connection: Close
+Content-Length: 5211
+Content-Type: text/html
+Date: Thu, 18 Aug 2016 18:57:32 GMT
+Server: Alchemist
+
+
+
+#+END_SRC
+
+\newpage
+** Status Codes :
+
+Following are some of httpie requests that showcase diffrent status codes
+- Not Implemented
+#+BEGIN_SRC text 
+ ~/c/n/p/doc $ http PUT  :9577/ -v
+PUT / HTTP/1.1
+Accept: */*
+Accept-Encoding: gzip, deflate
+Connection: keep-alive
+Content-Length: 0
+Host: localhost:9577
+User-Agent: HTTPie/0.9.4
+
+HTTP/1.0 501 Not Implemented
+Connection: keep-alive
+Content-Length: 29
+Content-Type: text/html
+
+<h1>501: Not Implemented</h1>
+
+#+END_SRC
+- Bad Request
+#+BEGIN_SRC text
+ ~/c/n/p/doc $ http PUTY  :9577/ -v
+PUTY / HTTP/1.1
+Accept: */*
+Accept-Encoding: gzip, deflate
+Connection: keep-alive
+Content-Length: 0
+Host: localhost:9577
+User-Agent: HTTPie/0.9.4
+
+HTTP/1.0 400 Bad Request
+Connection: keep-alive
+Content-Length: 25
+Content-Type: text/html
+
+<h1>400: Bad Request</h1>
+
+#+END_SRC
+- Not Found
+#+BEGIN_SRC text
+
+ ~/c/n/p/doc $ http GET  :9577/fdajlkdasj -v
+GET /fdajlkdasj HTTP/1.1
+Accept: */*
+Accept-Encoding: gzip, deflate
+Connection: keep-alive
+Host: localhost:9577
+User-Agent: HTTPie/0.9.4
+
+HTTP/1.0 404 Not Found
+Connection: keep-alive
+Content-Length: 23
+Content-Type: text/html
+
+<h1>404: Not Found</h1>
+
+#+END_SRC
+
+** Source code :
+#+BEGIN_SRC C++
+C++ code goes here.
+#+END_SRC

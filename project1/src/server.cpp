@@ -1,8 +1,9 @@
 
 // AUTHOR: Nishant Gupta
 
-
 #include <arpa/inet.h>
+#include <assert.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <signal.h>
@@ -14,13 +15,10 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
-#include <dirent.h>
-#include <assert.h>
-
 
 #define CONNMAX 1000
 #define BYTES 8096
-#define min(a, b)  (a < b) ? a : b
+#define min(a, b) (a < b) ? a : b
 
 char *ROOT = getenv("PWD"), PORT[8];
 int listenfd;
@@ -35,9 +33,10 @@ int sendCommonHeaders(int, int, int, char *);
 int sendNotFound(int, requestType);
 char *generateDirectoryList(char *, int &);
 
+// Parsing the command line arguments
 int parseArgs(int argc, char *argv[]) {
   char c;
-  // Parsing the command line arguments
+
   while ((c = getopt(argc, argv, "p:r:")) != -1)
     switch (c) {
     case 'r':
@@ -65,7 +64,6 @@ int main(int argc, char *argv[]) {
          ROOT);
   startServer(PORT);
 
-  // ACCEPT connections
   while (1) {
     addrlen = sizeof(clientaddr);
     clientSock = accept(listenfd, (struct sockaddr *)&clientaddr, &addrlen);
@@ -81,7 +79,7 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-// start server
+// starts the server, One time call
 void startServer(char *port) {
   struct addrinfo hints, *res, *p;
   int on = 1;
@@ -119,7 +117,10 @@ void startServer(char *port) {
   }
 }
 
-int sendCommonHeaders(int clientSock, int contentLength, int keepAliveStatus, char *mimeType) {
+//Sends headers that are common in all thre requests, currently only GET and
+//HEAD use it.
+int sendCommonHeaders(int clientSock, int contentLength, int keepAliveStatus,
+                      char *mimeType) {
   char tempBuffer[BYTES], dateBuffer[BYTES];
   send(clientSock, "HTTP/1.1 200 OK\r\n", 17, 0);
   send(clientSock, "Server: Alchemist\r\n", 19, 0);
@@ -132,12 +133,15 @@ int sendCommonHeaders(int clientSock, int contentLength, int keepAliveStatus, ch
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   snprintf(tempBuffer, BYTES, "Content-Type: %s\r\n", mimeType);
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
-  if(keepAliveStatus == 1)   snprintf(tempBuffer, BYTES, "Connection: Close\r\n\r\n");
-  else snprintf(tempBuffer, BYTES, "Connection: keep-alive \r\n\r\n");
+  if (keepAliveStatus == 1)
+    snprintf(tempBuffer, BYTES, "Connection: Close\r\n\r\n");
+  else
+    snprintf(tempBuffer, BYTES, "Connection: keep-alive \r\n\r\n");
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   return 0;
 }
 
+// Send 404 Status
 int sendNotFound(int clientSock, requestType curRequest) {
   char tempBuffer[1024];
   write(clientSock, "HTTP/1.0 404 Not Found\n", 23); // FILE NOT FOUND
@@ -152,6 +156,7 @@ int sendNotFound(int clientSock, requestType curRequest) {
   return 0;
 }
 
+// Send 400 Status
 int sendBadRequest(int clientSock, requestType curRequest) {
   char tempBuffer[1024];
   write(clientSock, "HTTP/1.0 400 Bad Request\r\n", 26); // FILE NOT FOUND
@@ -166,9 +171,12 @@ int sendBadRequest(int clientSock, requestType curRequest) {
   return 0;
 }
 
+
+// Send 500 status
 int sendInternalError(int clientSock, requestType curRequest) {
   char tempBuffer[1024];
-  write(clientSock, "HTTP/1.0 500 Internal Server Error\r\n", 36); // FILE NOT FOUND
+  write(clientSock, "HTTP/1.0 500 Internal Server Error\r\n",
+        36); // FILE NOT FOUND
   char *errMesg = (char *)"<h1>500: Internal Server Error</h1>";
   snprintf(tempBuffer, BYTES, "Content-Length: %d\n", (int)strlen(errMesg));
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
@@ -181,6 +189,8 @@ int sendInternalError(int clientSock, requestType curRequest) {
   return 0;
 }
 
+
+// Send 501 status
 int sendNotImplemented(int clientSock, requestType curRequest) {
   char tempBuffer[1024];
   write(clientSock, "HTTP/1.0 501 Not Implemented\r\n", 30); // FILE NOT FOUND
@@ -195,42 +205,50 @@ int sendNotImplemented(int clientSock, requestType curRequest) {
   return 0;
 }
 
-char* generateDirectoryList(char *path, int &size) {
+// generates directory listing for hyperlinked directory part
+char *generateDirectoryList(char *path, int &size) {
   DIR *dir;
   int idx = 0, written;
-  char* retVal = (char *)malloc(99999);
+  char *retVal = (char *)malloc(99999);
   struct dirent *ent;
-  if ((dir = opendir (path)) != NULL) {
+  if ((dir = opendir(path)) != NULL) {
     /* print all the files and directories within directory */
-    written = sprintf(retVal+idx,"<html><body><ul>\n");
+    written = sprintf(retVal + idx, "<html><body><ul>\n");
     idx += written;
-    while ((ent = readdir (dir)) != NULL) {
-      written = sprintf(retVal+idx,"<li><a href=\"%s/%s\">%s</a></li>\n", path + strlen(ROOT),  ent->d_name, ent->d_name);
+    while ((ent = readdir(dir)) != NULL) {
+      written = sprintf(retVal + idx, "<li><a href=\"%s/%s\">%s</a></li>\n",
+                        path + strlen(ROOT), ent->d_name, ent->d_name);
       idx += written;
     }
-    written = sprintf(retVal+idx,"</ul></body></html>\n");
+    written = sprintf(retVal + idx, "</ul></body></html>\n");
     idx += written;
     size = strlen(retVal);
     closedir(dir);
     return retVal;
   } else {
     /* could not open directory */
-    perror ("Could not open directory");
+    // This should never happen, because we can stat the directory.
+    // So we have exec permission.
+    perror("Could not open directory");
     return NULL;
   }
 }
 
+// Write size bytes form buffer to clientSock
 int writeBuffer(int clientSock, char *buffer, int size) {
   int totalWritten = 0, written = 0;
-  while(totalWritten < size) {
+  while (totalWritten < size) {
     written = send(clientSock, buffer + totalWritten, size - totalWritten, 0);
-    if(written <= 0 ) return -1;
+    if (written <= 0)
+      return -1;
     totalWritten += written;
   }
   return 0;
 }
 
-int respondHG(char *path, int clientSock, requestType curRequest, int keepAliveStatus) {
+// respond to HEAD and GET requests
+int respondHG(char *path, int clientSock, requestType curRequest,
+              int keepAliveStatus) {
   int fd, bytes_read, isDirectory, size;
   char data_to_send[BYTES], *directoryList;
   char mimeType[20];
@@ -238,66 +256,84 @@ int respondHG(char *path, int clientSock, requestType curRequest, int keepAliveS
   printf("file: %s\n", path);
 
   if (stat(path, &statsBuf) == 0) {
-    if( statsBuf.st_mode & S_IFDIR ) {
+    if (statsBuf.st_mode & S_IFDIR) {
       isDirectory = 1;
       directoryList = generateDirectoryList(path, size);
       strcpy(mimeType, "text/html");
-    } else {
+    } else { // it is a file
       size = (int)statsBuf.st_size;
+      // rest of the block runs file command in linux to get
+      // mimetype. write the output of command to a file and
+      // read it and delete it.
       char command[100], tempFile[100];
       snprintf(tempFile, 100, "mimeT%d", clientSock);
-      snprintf(command, 100,"file --mime-type %s | sed -n 's/.*: \\(.*\\)$/\\1/p' > %s" , path, tempFile);
+      snprintf(command, 100,
+               "file --mime-type %s | sed -n 's/.*: \\(.*\\)$/\\1/p' > %s",
+               path, tempFile);
       system(command);
-      FILE * mimeF = fopen(tempFile,"r");
+      FILE *mimeF = fopen(tempFile, "r");
       fscanf(mimeF, "%s", mimeType);
       fclose(mimeF);
       snprintf(command, 100, "rm -f %s", tempFile);
       system(command);
     }
-    printf("Mime Type : %s\n", mimeType);
+    //    printf("Mime Type : %s\n", mimeType);
     sendCommonHeaders(clientSock, size, keepAliveStatus, mimeType);
-    if(curRequest == GET) {
-      if(isDirectory) writeBuffer(clientSock, directoryList, size);
+    if (curRequest == GET) {
+      if (isDirectory)
+        writeBuffer(clientSock, directoryList, size);
       else {
         fd = open(path, O_RDONLY);
         while ((bytes_read = read(fd, data_to_send, BYTES)) > 0)
           write(clientSock, data_to_send, bytes_read);
       }
     }
-  } else {
+  } else { // If cannot stat, then as good as not found
     sendNotFound(clientSock, curRequest);
   }
   return 0;
 }
 
-
-int respondPOST(char *path, int clientSock, int postPayloadLength, int keepAliveStatus) {
+// responds to POST request. strtok here is continued from parsing function
+// with the same string. We read whatever payload was remaining in
+// buffer, and keep recieving till we have recieved it entirely.
+// Then, we write it to file.
+int respondPOST(char *path, int clientSock, int postPayloadLength,
+                int keepAliveStatus) {
   char postPayload[postPayloadLength], *initialPayload, tempBuffer[BYTES];
   initialPayload = strtok(NULL, "");
   int readTillNow = strlen(initialPayload), recieved;
   FILE *fd = fopen(path, "w");
   strcpy(postPayload, initialPayload);
-  while(readTillNow < postPayloadLength) {
-    recieved = recv(clientSock, tempBuffer, min(BYTES, postPayloadLength - readTillNow), 0);
-    strncpy(postPayload + readTillNow, tempBuffer, min(postPayloadLength - readTillNow, recieved));
+  while (readTillNow < postPayloadLength) {
+    recieved = recv(clientSock, tempBuffer,
+                    min(BYTES, postPayloadLength - readTillNow), 0);
+    strncpy(postPayload + readTillNow, tempBuffer,
+            min(postPayloadLength - readTillNow, recieved));
     readTillNow += recieved;
   }
-  fwrite(postPayload,1,postPayloadLength, fd);
+  fwrite(postPayload, 1, postPayloadLength, fd);
   fflush(fd);
   fclose(fd);
   char *successMesg = (char *)"<h1>Content written Succesfully</h1>";
   send(clientSock, "HTTP/1.1 200 OK\r\n", 17, 0);
   snprintf(tempBuffer, BYTES, "Content-Type: text/html\r\n");
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
-  snprintf(tempBuffer, BYTES, "Content-Length: %d\r\n", (int)strlen(successMesg));
+  snprintf(tempBuffer, BYTES, "Content-Length: %d\r\n",
+           (int)strlen(successMesg));
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
-  if(keepAliveStatus == 1)   snprintf(tempBuffer, BYTES, "Connection: Close\r\n\r\n");
-  else snprintf(tempBuffer, BYTES, "Connection: keep-alive \r\n\r\n");
+  if (keepAliveStatus == 1)
+    snprintf(tempBuffer, BYTES, "Connection: Close\r\n\r\n");
+  else
+    snprintf(tempBuffer, BYTES, "Connection: keep-alive \r\n\r\n");
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   send(clientSock, successMesg, strlen(successMesg), 0);
   return 1;
 }
 
+// Main function that is called after a fork().
+// while loop on recv, calls, parseHeaders when it recieves
+// some data, and then corresponding requestType handler
 void serveClient(int clientSock) {
   char mesg[BYTES], path[BYTES];
   int rcvd, keepAliveStatus = 0, payloadLength, idx = 1;
@@ -305,22 +341,31 @@ void serveClient(int clientSock) {
   fprintf(stderr, "Connected to client %d\n", clientSock);
   while ((rcvd = recv(clientSock, mesg, BYTES - 1, 0)) > 0) {
     fprintf(stderr, "\nRequest %d from Client %d\n", idx++, clientSock);
-      requestType currReq =
-          parseHeaders(mesg, keepAliveStatus, path, payloadLength);
-      if (currReq == GET || currReq == HEAD)
-        respondHG(path, clientSock, currReq, keepAliveStatus);
-      else if (currReq == POST)
-        respondPOST(path, clientSock, payloadLength, keepAliveStatus);
-      else if (currReq == UNIMPLEMENTED) sendNotImplemented(clientSock, currReq);
-      else if (currReq == BAD) sendBadRequest(clientSock, currReq);
-      else if (currReq == ERROR) sendInternalError(clientSock, currReq);
-      if (keepAliveStatus)
-        break;
+    requestType currReq =
+        parseHeaders(mesg, keepAliveStatus, path, payloadLength);
+    if (currReq == GET || currReq == HEAD)
+      respondHG(path, clientSock, currReq, keepAliveStatus);
+    else if (currReq == POST)
+      respondPOST(path, clientSock, payloadLength, keepAliveStatus);
+    else if (currReq == UNIMPLEMENTED)
+      sendNotImplemented(clientSock, currReq);
+    else if (currReq == BAD)
+      sendBadRequest(clientSock, currReq);
+    else if (currReq == ERROR)
+      sendInternalError(clientSock, currReq);
+    if (keepAliveStatus)
+      break;
   }
   fprintf(stderr, "Closed Client\n");
   close(clientSock);
 }
 
+
+//Parses request headers
+//keepAliveStatus: 1 if connection is to be closed
+//path: path of file to be fetched in GET or HEAD and
+//      path of file to which payload is to be writeen in POST
+//payloadLength: length of payload in case of POST, irrelevant in others
 requestType parseHeaders(char *mesg, int &keepAliveStatus, char *path,
                          int &payloadLength) {
   char *reqline[3], *headerLine;
@@ -339,10 +384,11 @@ requestType parseHeaders(char *mesg, int &keepAliveStatus, char *path,
              strncmp(reqline[0], "CONNECT\0", 8) == 0 ||
              strncmp(reqline[0], "OPTIONS\0", 8) == 0)
       return UNIMPLEMENTED;
-    else return BAD;
+    else
+      return BAD;
     reqline[1] = strtok(NULL, " \t");
     reqline[2] = strtok(NULL, "\n");
-    printf("%s %s %s", reqline[0],reqline[1], reqline[2]);
+    printf("%s %s %s", reqline[0], reqline[1], reqline[2]);
     if ((strncmp(reqline[2], "HTTP/1.1", 8) != 0) &&
         (strncmp(reqline[2], "HTTP/1.0", 8) != 0)) {
       return BAD;
@@ -369,5 +415,7 @@ requestType parseHeaders(char *mesg, int &keepAliveStatus, char *path,
       headerLine = strtok(NULL, "\n");
     }
     return curRequest;
-  } catch(...) {return ERROR;}
+  } catch (...) {
+    return ERROR;
+  }
 }
