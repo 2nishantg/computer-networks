@@ -60,9 +60,9 @@ int main(int argc, char *argv[]) {
   strcpy(PORT, "9576");
   parseArgs(argc, argv);
 
+  startServer(PORT);
   printf("Server started at port no. %s with root directory as %s\n", PORT,
          ROOT);
-  startServer(PORT);
 
   while (1) {
     addrlen = sizeof(clientaddr);
@@ -121,9 +121,10 @@ void startServer(char *port) {
 //HEAD use it.
 int sendCommonHeaders(int clientSock, int contentLength, int keepAliveStatus,
                       char *mimeType) {
-  char tempBuffer[BYTES], dateBuffer[BYTES];
+  char tempBuffer[BYTES];
   send(clientSock, "HTTP/1.1 200 OK\r\n", 17, 0);
   send(clientSock, "Server: Alchemist\r\n", 19, 0);
+  char dateBuffer[BYTES];
   time_t now = time(0);
   struct tm tm = *gmtime(&now);
   strftime(dateBuffer, sizeof(dateBuffer), "%a, %d %b %Y %H:%M:%S %Z", &tm);
@@ -145,6 +146,13 @@ int sendCommonHeaders(int clientSock, int contentLength, int keepAliveStatus,
 int sendNotFound(int clientSock, requestType curRequest) {
   char tempBuffer[1024];
   write(clientSock, "HTTP/1.0 404 Not Found\n", 23); // FILE NOT FOUND
+  send(clientSock, "Server: Alchemist\r\n", 19, 0);
+  char dateBuffer[BYTES];
+  time_t now = time(0);
+  struct tm tm = *gmtime(&now);
+  strftime(dateBuffer, sizeof(dateBuffer), "%a, %d %b %Y %H:%M:%S %Z", &tm);
+  snprintf(tempBuffer, sizeof(tempBuffer), "Date: %s\r\n", dateBuffer);
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   char *errMesg = (char *)"<h1>404: Not Found</h1>";
   snprintf(tempBuffer, BYTES, "Content-Length: %d\n", (int)strlen(errMesg));
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
@@ -159,7 +167,14 @@ int sendNotFound(int clientSock, requestType curRequest) {
 // Send 400 Status
 int sendBadRequest(int clientSock, requestType curRequest) {
   char tempBuffer[1024];
-  write(clientSock, "HTTP/1.0 400 Bad Request\r\n", 26); // FILE NOT FOUND
+  write(clientSock, "HTTP/1.0 400 Bad Request\r\n", 26);
+  send(clientSock, "Server: Alchemist\r\n", 19, 0);
+  char dateBuffer[BYTES];
+  time_t now = time(0);
+  struct tm tm = *gmtime(&now);
+  strftime(dateBuffer, sizeof(dateBuffer), "%a, %d %b %Y %H:%M:%S %Z", &tm);
+  snprintf(tempBuffer, sizeof(tempBuffer), "Date: %s\r\n", dateBuffer);
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   char *errMesg = (char *)"<h1>400: Bad Request</h1>";
   snprintf(tempBuffer, BYTES, "Content-Length: %d\n", (int)strlen(errMesg));
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
@@ -175,8 +190,14 @@ int sendBadRequest(int clientSock, requestType curRequest) {
 // Send 500 status
 int sendInternalError(int clientSock, requestType curRequest) {
   char tempBuffer[1024];
-  write(clientSock, "HTTP/1.0 500 Internal Server Error\r\n",
-        36); // FILE NOT FOUND
+  write(clientSock, "HTTP/1.0 500 Internal Server Error\r\n", 36);
+  send(clientSock, "Server: Alchemist\r\n", 19, 0);
+  char dateBuffer[BYTES];
+  time_t now = time(0);
+  struct tm tm = *gmtime(&now);
+  strftime(dateBuffer, sizeof(dateBuffer), "%a, %d %b %Y %H:%M:%S %Z", &tm);
+  snprintf(tempBuffer, sizeof(tempBuffer), "Date: %s\r\n", dateBuffer);
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   char *errMesg = (char *)"<h1>500: Internal Server Error</h1>";
   snprintf(tempBuffer, BYTES, "Content-Length: %d\n", (int)strlen(errMesg));
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
@@ -194,6 +215,13 @@ int sendInternalError(int clientSock, requestType curRequest) {
 int sendNotImplemented(int clientSock, requestType curRequest) {
   char tempBuffer[1024];
   write(clientSock, "HTTP/1.0 501 Not Implemented\r\n", 30); // FILE NOT FOUND
+  send(clientSock, "Server: Alchemist\r\n", 19, 0);
+  char dateBuffer[BYTES];
+  time_t now = time(0);
+  struct tm tm = *gmtime(&now);
+  strftime(dateBuffer, sizeof(dateBuffer), "%a, %d %b %Y %H:%M:%S %Z", &tm);
+  snprintf(tempBuffer, sizeof(tempBuffer), "Date: %s\r\n", dateBuffer);
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   char *errMesg = (char *)"<h1>501: Not Implemented</h1>";
   snprintf(tempBuffer, BYTES, "Content-Length: %d\n", (int)strlen(errMesg));
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
@@ -216,7 +244,7 @@ char *generateDirectoryList(char *path, int &size) {
     written = sprintf(retVal + idx, "<html><body><ul>\n");
     idx += written;
     while ((ent = readdir(dir)) != NULL) {
-      written = sprintf(retVal + idx, "<li><a href=\"%s/%s\">%s</a></li>\n",
+      written = sprintf(retVal + idx, "<li><a href=\"%s%s\">%s</a></li>\n",
                         path + strlen(ROOT), ent->d_name, ent->d_name);
       idx += written;
     }
@@ -253,7 +281,7 @@ int respondHG(char *path, int clientSock, requestType curRequest,
   char data_to_send[BYTES], *directoryList;
   char mimeType[20];
   struct stat statsBuf;
-  printf("file: %s\n", path);
+  printf("file: '%s'\n", path);
 
   if (stat(path, &statsBuf) == 0) {
     if (statsBuf.st_mode & S_IFDIR) {
@@ -265,9 +293,9 @@ int respondHG(char *path, int clientSock, requestType curRequest,
       // rest of the block runs file command in linux to get
       // mimetype. write the output of command to a file and
       // read it and delete it.
-      char command[100], tempFile[100];
-      snprintf(tempFile, 100, "mimeT%d", clientSock);
-      snprintf(command, 100,
+      char command[1024], tempFile[1024];
+      snprintf(tempFile, 1024, "mimeT%d", clientSock);
+      snprintf(command, 1024,
                "file --mime-type %s | sed -n 's/.*: \\(.*\\)$/\\1/p' > %s",
                path, tempFile);
       system(command);
@@ -317,6 +345,13 @@ int respondPOST(char *path, int clientSock, int postPayloadLength,
   fclose(fd);
   char *successMesg = (char *)"<h1>Content written Succesfully</h1>";
   send(clientSock, "HTTP/1.1 200 OK\r\n", 17, 0);
+  send(clientSock, "Server: Alchemist\r\n", 19, 0);
+  char dateBuffer[BYTES];
+  time_t now = time(0);
+  struct tm tm = *gmtime(&now);
+  strftime(dateBuffer, sizeof(dateBuffer), "%a, %d %b %Y %H:%M:%S %Z", &tm);
+  snprintf(tempBuffer, sizeof(tempBuffer), "Date: %s\r\n", dateBuffer);
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   snprintf(tempBuffer, BYTES, "Content-Type: text/html\r\n");
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   snprintf(tempBuffer, BYTES, "Content-Length: %d\r\n",
