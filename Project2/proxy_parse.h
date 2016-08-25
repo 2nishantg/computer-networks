@@ -63,7 +63,7 @@ struct ParsedRequest* ParsedRequest_create();
 
 /* Parse the request buffer in buf given that buf is of length buflen */
 int ParsedRequest_parse(struct ParsedRequest * parse, const char *buf,
-			int buflen);
+                        int buflen, int *headerEnd);
 
 /* Destroy the parsing object. */
 void ParsedRequest_destroy(struct ParsedRequest *pr);

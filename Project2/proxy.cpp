@@ -26,30 +26,13 @@ void serveClient(int);
 char *ROOT = getenv("PWD"), PORT[8];
 int listenfd;
 
-// Parsing the command line arguments
-int parseArgs(int argc, char *argv[]) {
-  char c;
-  while ((c = getopt(argc, argv, "p:")) != -1)
-    switch (c) {
-    case 'p':
-      strcpy(PORT, optarg);
-      break;
-    default:
-      fprintf(stderr, "%s [-p PORT] [-r ROOT]\n", argv[0]);
-      exit(1);
-    }
-  return 0;
-}
-
-
 int main(int argc, char * argv[]) {
   struct sockaddr_in clientaddr;
   socklen_t addrlen;
   int clientSock;
-  strcpy(PORT, "9576");
-  parseArgs(argc, argv);
+  strcpy(PORT, argv[1]);
   startServer(PORT);
-  printf("Proxy server started at port no. %s\n", PORT);
+  //  printf("Proxy server started at port no. %s\nProxy running", PORT);
   setbuf(stdout, NULL);
   while (1) {
     addrlen = sizeof(clientaddr);
@@ -60,7 +43,7 @@ int main(int argc, char * argv[]) {
       if (fork() == 0) {
         serveClient(clientSock);
         exit(0);
-      }
+      } else close(clientSock);
     }
   }
 
@@ -106,12 +89,56 @@ void startServer(char *port) {
   }
 }
 
+// Write size bytes form buffer to clientSock
+int writeBuffer(int clientSock, char *buffer, int size) {
+  int totalWritten = 0, written = 0;
+  while (totalWritten < size) {
+    written = send(clientSock, buffer + totalWritten, size - totalWritten, 0);
+    if (written <= 0)
+      return -1;
+    totalWritten += written;
+  }
+  return 0;
+}
+
+int response(int clientSock, int socketFd) {
+  char mesg[BYTES];
+  int rcvd,totalSent, sent;
+  while ((rcvd = recv(socketFd, mesg, BYTES - 1, 0)) > 0) {
+    totalSent = 0;
+    while(totalSent < rcvd) {
+      sent = send(clientSock, mesg+totalSent, rcvd - totalSent, 0);
+      if(sent <= 0) return -1;
+      totalSent+=sent;
+    }
+  }
+  close(clientSock);
+  return 1;
+}
+
+int memsearch(const char *hay, int haysize, const char *needle, int needlesize) {
+  int haypos, needlepos;
+  haysize -= needlesize;
+  for (haypos = 0; haypos <= haysize; haypos++) {
+    for (needlepos = 0; needlepos < needlesize; needlepos++) {
+      if (hay[haypos + needlepos] != needle[needlepos]) {
+        // Next character in haystack.
+        break;
+      }
+    }
+    if (needlepos == needlesize) {
+      return haypos;
+    }
+  }
+  return -1;
+}
+
+
 // Main function that is called after a fork().
 void serveClient(int clientSock) {
   char mesg[BYTES];
   int rcvd, offset=0, currentBlank = 0;
   memset((void *)mesg, 0, BYTES);
-  fprintf(stderr, "Connected to client %d\n", clientSock);
   while ((rcvd = recv(clientSock, mesg+offset, BYTES - 1 - offset, 0)) > 0) {
     //    printf("%.*s", rcvd, mesg + offset);
     if( rcvd == 2 && strncmp(mesg+offset, "\r\n", 2) == 0){
@@ -119,22 +146,20 @@ void serveClient(int clientSock) {
       else offset -= rcvd; // remove stray blank lines
     } else currentBlank = 0;
     offset += rcvd;
-    if(currentBlank == 2) {
-      mesg[offset+1] = 0;
+    if(currentBlank == 2 || (offset >= 4 && strncmp(mesg+offset-4,"\r\n\r\n", 4) == 0)) {
+      mesg[offset] = 0;
       //      fprintf(stdout, "%d \n%s", offset, mesg);
       //      fflush(stdout);
       ParsedRequest *req = ParsedRequest_create();
       struct hostent *he;
       struct sockaddr_in serverInfo;
-      int socketFd;
-      if (ParsedRequest_parse(req, mesg, offset) < 0) {
+      int socketFd, headerEnd;
+      if (ParsedRequest_parse(req, mesg, offset, &headerEnd) < 0) {
         printf("parse failed\n");
       } else {
         if ((he = gethostbyname(req->host)) == NULL) { // get host from name
           fprintf(stderr, "Cannot get host name\n");
         } else {
-          char *successMessage = (char *)"Request acknowledged and is valid\n";
-          send(clientSock, successMessage, strlen(successMessage), 0);
           if(req->port == NULL) req->port = (char *)"80";
           memset(&serverInfo, 0, sizeof(serverInfo)); // Initialize serverInfo struct
           serverInfo.sin_family = AF_INET;
@@ -147,15 +172,18 @@ void serveClient(int clientSock) {
             fprintf(stderr, "Connection Failure\n");
             perror("connect");
           } else {
-            char *successMessage = (char *)"Connected to remote server\n";
-            send(clientSock, successMessage, strlen(successMessage), 0);
+            if (ParsedHeader_set(req, "Connection", "Close") < 0){
+              printf("Could not set connection to close\n");
+            }
             int rlen = ParsedRequest_totalLen(req);
             char *buf = (char *)malloc(rlen+1);
             if (ParsedRequest_unparse(req, buf, rlen) < 0) {
               printf("unparse failed\n");
             } else {
-              buf[rlen] ='\0';
-              printf( "%s\n", buf);
+              writeBuffer(socketFd, buf, rlen);
+              // buf[rlen] ='\0';
+              // printf( "%s\n", buf);
+              response(clientSock, socketFd);
             }
             close(socketFd);
           }
@@ -166,7 +194,7 @@ void serveClient(int clientSock) {
       currentBlank = 0;
     }
   }
-  fprintf(stderr, "Closed Client\n");
+  //  fprintf(stderr, "Closed Client\n");
   close(clientSock);
   return;
 }
