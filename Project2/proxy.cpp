@@ -31,12 +31,10 @@ int listenfd;
 int main(int argc, char * argv[]) {
   struct sockaddr_in clientaddr;
   socklen_t addrlen;
-  int clientSock, i;
-  int * shared = (int *)mmap(NULL, sizeof(int)*CONNMAX, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-  for(int i = 0; i < CONNMAX; i++) shared[i] = -1;
+  int clientSock, numProcess = 0, pStatus;
   strcpy(PORT, argv[1]);
   startServer(PORT);
-  //  printf("Proxy server started at port no. %s\nProxy running", PORT);
+  //printf("Proxy server started at port no. %s\nProxy running", PORT);
   setbuf(stdout, NULL);
   while (1) {
     addrlen = sizeof(clientaddr);
@@ -44,15 +42,12 @@ int main(int argc, char * argv[]) {
     if (clientSock < 0)
       perror("accept() error");
     else {
-      for(i = 0; i < CONNMAX; i++) {
-        if(shared[i] == -1) break;
-        if(i == CONNMAX - 1) sleep(1);
+      if(numProcess >= CONNMAX) {
+        if (wait(&pStatus) > 0) numProcess--;
       }
-      shared[i] = clientSock;
+      numProcess++;
       if (fork() == 0) {
         serveClient(clientSock);
-        if(shared[i] != clientSock) assert(false);
-        shared[i] = -1;
         exit(0);
       } else close(clientSock);
     }
