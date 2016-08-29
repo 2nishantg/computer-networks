@@ -173,7 +173,7 @@ def http_exchange(host, port, data):
      conn = telnetlib.Telnet()
      conn.open(host, port)
      conn.write(data)
-     ret_data = conn.read_all()
+     ret_data = conn.read_some()
      conn.close()
      return ret_data
 

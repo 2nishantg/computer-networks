@@ -18,6 +18,7 @@
 #define PROXY_PARSE
 
 #define DEBUG 1
+#define NOTGET -2
 
 /*
    ParsedRequest objects are created from parsing a buffer containing a HTTP

@@ -360,7 +360,7 @@ int ParsedRequest_parse(struct ParsedRequest *parse, const char *buf,
     free(tmp_buf);
     free(parse->buf);
     parse->buf = NULL;
-    return -1;
+    return NOTGET;
   }
 
   full_addr = strtok_r(NULL, " ", &saveptr);

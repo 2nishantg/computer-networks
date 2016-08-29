@@ -11,10 +11,12 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
-#define CONNMAX 1000
+#define CONNMAX 20
 #define BYTES 8096
 #define min(a, b) (a < b) ? a : b
 
@@ -29,7 +31,9 @@ int listenfd;
 int main(int argc, char * argv[]) {
   struct sockaddr_in clientaddr;
   socklen_t addrlen;
-  int clientSock;
+  int clientSock, i;
+  int * shared = (int *)mmap(NULL, sizeof(int)*CONNMAX, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+  for(int i = 0; i < CONNMAX; i++) shared[i] = -1;
   strcpy(PORT, argv[1]);
   startServer(PORT);
   //  printf("Proxy server started at port no. %s\nProxy running", PORT);
@@ -40,8 +44,15 @@ int main(int argc, char * argv[]) {
     if (clientSock < 0)
       perror("accept() error");
     else {
+      for(i = 0; i < CONNMAX; i++) {
+        if(shared[i] == -1) break;
+        if(i == CONNMAX - 1) sleep(1);
+      }
+      shared[i] = clientSock;
       if (fork() == 0) {
         serveClient(clientSock);
+        if(shared[i] != clientSock) assert(false);
+        shared[i] = -1;
         exit(0);
       } else close(clientSock);
     }
@@ -112,7 +123,7 @@ int response(int clientSock, int socketFd) {
       totalSent+=sent;
     }
   }
-  close(clientSock);
+  //  close(clientSock);
   return 1;
 }
 
@@ -131,6 +142,28 @@ int memsearch(const char *hay, int haysize, const char *needle, int needlesize) 
     }
   }
   return -1;
+}
+
+
+// Send 500 status
+int sendInternalError(int clientSock) {
+  char tempBuffer[1024];
+  write(clientSock, "HTTP/1.0 500 Internal Server Error\r\n", 36);
+  send(clientSock, "Server: Alchemist\r\n", 19, 0);
+  char dateBuffer[BYTES];
+  time_t now = time(0);
+  struct tm tm = *gmtime(&now);
+  strftime(dateBuffer, sizeof(dateBuffer), "%a, %d %b %Y %H:%M:%S %Z", &tm);
+  snprintf(tempBuffer, sizeof(tempBuffer), "Date: %s\r\n", dateBuffer);
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
+  char *errMesg = (char *)"<h1>500: Internal Server Error</h1>\n";
+  snprintf(tempBuffer, BYTES, "Content-Length: %d\n", (int)strlen(errMesg));
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
+  snprintf(tempBuffer, BYTES, "Content-Type: text/html\r\n");
+  send(clientSock, tempBuffer, strlen(tempBuffer), 0);
+  send(clientSock, "Connection: close\r\n\r\n", 26, 0);
+  send(clientSock, errMesg, strlen(errMesg) + 1, 0);
+  return 0;
 }
 
 
@@ -153,9 +186,9 @@ void serveClient(int clientSock) {
       ParsedRequest *req = ParsedRequest_create();
       struct hostent *he;
       struct sockaddr_in serverInfo;
-      int socketFd, headerEnd;
-      if (ParsedRequest_parse(req, mesg, offset, &headerEnd) < 0) {
-        printf("parse failed\n");
+      int socketFd, headerEnd, retval;
+      if ((retval = ParsedRequest_parse(req, mesg, offset, &headerEnd)) < 0) {
+        sendInternalError(clientSock);
       } else {
         if ((he = gethostbyname(req->host)) == NULL) { // get host from name
           fprintf(stderr, "Cannot get host name\n");
@@ -166,19 +199,18 @@ void serveClient(int clientSock) {
           serverInfo.sin_port = htons(atoi(req->port));
           serverInfo.sin_addr = *((struct in_addr *)he->h_addr);
           if ((socketFd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
-            fprintf(stderr, "Socket Failure!!\n");
+            sendInternalError(clientSock);
           } else if (connect(socketFd, (struct sockaddr *)&serverInfo,
                       sizeof(struct sockaddr)) < 0) {
-            fprintf(stderr, "Connection Failure\n");
-            perror("connect");
+            sendInternalError(clientSock);
           } else {
             if (ParsedHeader_set(req, "Connection", "Close") < 0){
-              printf("Could not set connection to close\n");
+              sendInternalError(clientSock);
             }
             int rlen = ParsedRequest_totalLen(req);
             char *buf = (char *)malloc(rlen+1);
             if (ParsedRequest_unparse(req, buf, rlen) < 0) {
-              printf("unparse failed\n");
+              sendInternalError(clientSock);
             } else {
               writeBuffer(socketFd, buf, rlen);
               // buf[rlen] ='\0';
@@ -194,7 +226,7 @@ void serveClient(int clientSock) {
       currentBlank = 0;
     }
   }
-  //  fprintf(stderr, "Closed Client\n");
-  close(clientSock);
+  //  close(clientSock);
+  shutdown(clientSock, SHUT_RDWR);
   return;
 }
