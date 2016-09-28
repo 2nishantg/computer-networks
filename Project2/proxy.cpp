@@ -17,11 +17,14 @@
 #include <unistd.h>
 
 #define CONNMAX 20
-#define BYTES 8096
+#define BYTES 8192
+#define MAXREQSIZE 32768
+#define TIMEOUT 30
 #define min(a, b) (a < b) ? a : b
+#define max(a, b) (a > b) ? a : b
 
 
-
+int sendInternalError(int);
 void startServer(char *);
 void serveClient(int);
 
@@ -55,7 +58,6 @@ int main(int argc, char * argv[]) {
 
   return 0;
 }
-
 
 // starts the server, One time call
 void startServer(char *port) {
@@ -118,10 +120,11 @@ int response(int clientSock, int socketFd) {
       totalSent+=sent;
     }
   }
-  //  close(clientSock);
+  close(clientSock);
   return 1;
 }
 
+//a better substr function
 int memsearch(const char *hay, int haysize, const char *needle, int needlesize) {
   int haypos, needlepos;
   haysize -= needlesize;
@@ -158,17 +161,22 @@ int sendInternalError(int clientSock) {
   send(clientSock, tempBuffer, strlen(tempBuffer), 0);
   send(clientSock, "Connection: close\r\n\r\n", 26, 0);
   send(clientSock, errMesg, strlen(errMesg) + 1, 0);
+  close(clientSock);
   return 0;
 }
 
 
 // Main function that is called after a fork().
 void serveClient(int clientSock) {
-  char mesg[BYTES];
-  int rcvd, offset=0, currentBlank = 0;
+  struct timeval tv;
+  tv.tv_sec = TIMEOUT;  /* 30 Secs Timeout */
+  tv.tv_usec = 0;  // Not init'ing this can cause strange errors
+  setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,sizeof(struct timeval));
+  int rcvd, offset=0, currentBlank = 0, bufSize = BYTES;
+  char *mesg = (char *)malloc(bufSize) ;
   memset((void *)mesg, 0, BYTES);
   while ((rcvd = recv(clientSock, mesg+offset, BYTES - 1 - offset, 0)) > 0) {
-    //    printf("%.*s", rcvd, mesg + offset);
+    //To ignore blank lines entered in telnet
     if( rcvd == 2 && strncmp(mesg+offset, "\r\n", 2) == 0){
       if(offset != 0) currentBlank++;
       else offset -= rcvd; // remove stray blank lines
@@ -186,7 +194,7 @@ void serveClient(int clientSock) {
         sendInternalError(clientSock);
       } else {
         if ((he = gethostbyname(req->host)) == NULL) { // get host from name
-          fprintf(stderr, "Cannot get host name\n");
+          //fprintf(stderr, "Cannot get host name\n");
         } else {
           if(req->port == NULL) req->port = (char *)"80";
           memset(&serverInfo, 0, sizeof(serverInfo)); // Initialize serverInfo struct
@@ -220,8 +228,16 @@ void serveClient(int clientSock) {
       offset = 0;
       currentBlank = 0;
     }
+    else { // reallocate mesg buffer to accomodate increasing size.
+      if(offset > MAXREQSIZE) break; // break if request exceeds max size
+      if(offset > bufSize/2) {
+        bufSize*=2;
+        mesg = (char *)realloc(mesg, max(bufSize, MAXREQSIZE));
+        if(mesg == NULL) exit(1);
+      }
+    }
   }
-  //  close(clientSock);
+  free(mesg);
   shutdown(clientSock, SHUT_RDWR);
   return;
 }
