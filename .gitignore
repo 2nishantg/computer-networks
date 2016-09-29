@@ -10,3 +10,5 @@
 CSE425_VM*
 Logs/*
 Lecture*
+
+*.o

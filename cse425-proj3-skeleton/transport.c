@@ -69,7 +69,6 @@ void transport_init(mysocket_t sd, bool_t is_active) {
    * if connection fails; to do so, just set errno appropriately (e.g. to
    * ECONNREFUSED, etc.) before calling the function.
    */
-  printf("STCP Header Size : %lu\n", sizeof(STCPHeader));
   if (is_active) {
     /**/
     printf("Active Connection initiation request\n");
@@ -85,6 +84,7 @@ void transport_init(mysocket_t sd, bool_t is_active) {
     stcp_network_recv(sd, hdr, sizeof(STCPHeader));
     ntoh(hdr);
     assert(hdr->th_flags == (TH_SYN | TH_ACK));
+    assert(ctx->current_sequence_num == hdr->th_ack);
     ctx->initial_sequence_num_peer = hdr->th_seq;
     ctx->current_sequence_num_peer = ctx->initial_sequence_num_peer + 1;
 
@@ -109,7 +109,7 @@ void transport_init(mysocket_t sd, bool_t is_active) {
     // send SYN+ACK packet
     memset(hdr, 0, sizeof(STCPHeader));
     hdr->th_flags = TH_ACK | TH_SYN;
-    hdr->th_seq = ctx->initial_sequence_num;
+    hdr->th_seq = ctx->current_sequence_num++;
     hdr->th_ack = ctx->current_sequence_num_peer;
     hton(hdr);
     stcp_network_send(sd, hdr, sizeof(STCPHeader), NULL);
@@ -117,8 +117,9 @@ void transport_init(mysocket_t sd, bool_t is_active) {
     // recieve ACK
     stcp_network_recv(sd, hdr, sizeof(STCPHeader));
     ntoh(hdr);
+
     assert(hdr->th_flags & TH_ACK);
-    assert(++(ctx->current_sequence_num) == hdr->th_ack);
+    assert(ctx->current_sequence_num == hdr->th_ack);
   }
   ctx->connection_state = CSTATE_ESTABLISHED;
   /**/
@@ -139,7 +140,9 @@ static void generate_initial_seq_num(context_t *ctx) {
   ctx->initial_sequence_num = 1;
 #else
   /* you have to fill this up */
-  ctx->initial_sequence_num = rand() % 256;
+  ctx->initial_sequence_num = 1; // testing
+
+  //  ctx->initial_sequence_num = rand() % 256;
   ctx->current_sequence_num = ctx->initial_sequence_num;
 #endif
 }
@@ -166,15 +169,15 @@ static void control_loop(mysocket_t sd, context_t *ctx) {
 
     event = stcp_wait_for_event(sd, ANY_EVENT, NULL);
 
-    if (event & APP_DATA) {
+    if ((event & APP_DATA) && !this_end_closed) {
 
       int data_limit = MIN(STCP_MSS, ctx->sender_window - ctx->unacked);
 
-      hdr->th_ack = ctx->current_sequence_num_peer;
       hdr->th_seq = ctx->current_sequence_num;
       hdr->th_off = off;
       hdr->th_flags = 0;
       hdr->th_win = ctx->congestion_window;
+      //printf("Sent packet : %d\n", hdr->th_seq);
       int bytes_to_send = stcp_app_recv(sd, buffer, data_limit);
       hton(hdr);
       stcp_network_send(sd, hdr, sizeof(STCPHeader), buffer, bytes_to_send,
@@ -186,36 +189,50 @@ static void control_loop(mysocket_t sd, context_t *ctx) {
 
     if (event & NETWORK_DATA) {
       int bytes_received = stcp_network_recv(sd, buffer, STCP_MSS + off * 4);
+      if(bytes_received == 0) {
+        printf("Other end unexpectedly closed\n");
+        ctx->done = TRUE;
+        continue;
+      }
 
       memcpy((void *)hdr, buffer, sizeof(STCPHeader));
       ntoh(hdr);
       ctx->sender_window = MIN(hdr->th_win, ctx->congestion_window);
 
       if (hdr->th_flags & TH_ACK) {
-        ctx->last_acked = hdr->th_seq - 1;
+        //        printf("Acknowledgement : %d %d\n", hdr->th_ack, bytes_received);
+        ctx->last_acked = hdr->th_ack - 1;
         ctx->unacked = ctx->current_sequence_num - hdr->th_ack;
+        ctx->sender_window = MIN(hdr->th_win, ctx->congestion_window);
+        if(this_end_closed) { // we won't send any data after this
+                              // so this should hold
+          assert(hdr->th_ack <= ctx->current_sequence_num + 1);
+        }
       }
 
       if (bytes_received - off * 4 > 0) {
+        if(ctx->current_sequence_num_peer > hdr->th_seq + bytes_received - off * 4)
+          continue;
+        //printf("Recieved packet : %d %d\n", hdr->th_seq, ctx->current_sequence_num_peer);
 
-        ctx->current_sequence_num_peer += bytes_received - off * 4;
-        hdr->th_ack = ctx->current_sequence_num_peer;
-        hdr->th_seq = ctx->current_sequence_num;
+        int new_data_offset = 0;
+        new_data_offset = ctx->current_sequence_num_peer - hdr->th_seq;
+        ctx->current_sequence_num_peer = hdr->th_seq + bytes_received - off * 4;
+        hdr->th_ack = ctx->current_sequence_num_peer + 1;
         hdr->th_flags = TH_ACK;
         hdr->th_win = ctx->congestion_window;
 
         hton(hdr);
         stcp_network_send(sd, hdr, off * 4, NULL);
-        stcp_app_send(sd, (char *)buffer + off * 4, bytes_received - off * 4);
+        stcp_app_send(sd, (char *)buffer + off * 4 + new_data_offset, bytes_received - off * 4 - new_data_offset);
       }
 
 
       if (hdr->th_flags & TH_FIN) {
-        printf("Close tester  : %d\n", hdr->th_win);
         //ACK for FIN
         memset(hdr, 0, sizeof(STCPHeader));
-        hdr->th_ack = ctx->current_sequence_num_peer;
-        hdr->th_seq = ctx->current_sequence_num; // Should this be here
+        hdr->th_ack = ctx->current_sequence_num_peer+1 ;
+        //printf("FIN closing number : %d\n", hdr->th_ack);
         hdr->th_flags = TH_ACK;
         hdr->th_win = ctx->congestion_window;
 
@@ -235,17 +252,11 @@ static void control_loop(mysocket_t sd, context_t *ctx) {
       hdr->th_seq = ctx->current_sequence_num;
       hdr->th_flags = TH_FIN;
       hdr->th_win = 3197;
+      //printf("Sent Closing packet : %d\n", hdr->th_seq);
 
       hton(hdr);
       stcp_network_send(sd, hdr, off * 4, NULL);
 
-      // wait for ACK
-      int bytes_received = stcp_network_recv(sd, buffer, STCP_MSS + off * 4);
-      memcpy((void *)hdr, buffer, sizeof(STCPHeader));
-      ntoh(hdr);
-      printf("Bytes recieved : %d\n", bytes_received);
-      assert(bytes_received == off*4);
-      assert(hdr->th_flags & TH_ACK);
 
       this_end_closed = TRUE;
     }
