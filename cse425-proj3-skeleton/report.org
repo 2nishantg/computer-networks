@@ -1,3 +1,36 @@
+#+TITLE:     CS425 - Project 3 Report
+#+AUTHOR:    Nishant Gupta, nishgu@iitk.ac.in, 13447
+#+DESCRIPTION: STCP protocol implementation
+#+OPTIONS: toc:nil
+
+
+# #+LATEX_HEADER: \setmonofont{PragmataPro}
+#+LATEX_HEADER: \usepackage[top=0.25in, left=0.45in, right=0.75in, bottom=0.25in]{geometry}
+
+
+#+BEGIN_LaTeX
+\begin{center}
+\texttt{\Huge STCP Protocol}
+\end{center}
+\newpage
+#+END_LaTeX
+
+* Implementation Specs
+- Sliding window is implemented
+- Proper endianness handling is insured
+- Abrupt disconnects are handled
+- Proper errno is set
+
+* Test results
+- All Combinations of two clients(reference client and client.c in skeleton) and 
+  two server(reference server and server.c in skeleton) are working properly
+- The client exits cleanly with ~Ctrl+D~ and ~Ctrl+C~ interrupts and the server with ~Ctrl+C~ interrupt.
+- Single file transfer with ~-f~ flag is working properly
+- Multiple client connections are working fine with one client queued after other
+
+* Appendix
+** Source code :
+#+BEGIN_SRC C++
 /*
  * transport.c
  *
@@ -354,3 +387,5 @@ void our_dprintf(const char *format, ...) {
   fputs(buffer, stdout);
   fflush(stdout);
 }
+
+#+END_SRC

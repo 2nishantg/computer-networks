@@ -1,7 +1,66 @@
+% Created 2016-09-30 Fri 21:21
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{fixltx2e}
+\usepackage{graphicx}
+\usepackage{grffile}
+\usepackage{longtable}
+\usepackage{wrapfig}
+\usepackage{rotating}
+\usepackage[normalem]{ulem}
+\usepackage{amsmath}
+\usepackage{textcomp}
+\usepackage{amssymb}
+\usepackage{capt-of}
+\usepackage{hyperref}
+\usepackage[top=0.25in, left=0.45in, right=0.75in, bottom=0.25in]{geometry}
+\author{Nishant Gupta, nishgu@iitk.ac.in, 13447}
+\date{\today}
+\title{CS425 - Project 3 Report}
+\hypersetup{
+ pdfauthor={Nishant Gupta, nishgu@iitk.ac.in, 13447},
+ pdftitle={CS425 - Project 3 Report},
+ pdfkeywords={},
+ pdfsubject={STCP protocol implementation},
+ pdfcreator={Emacs 24.5.1 (Org mode 8.3.6)}, 
+ pdflang={English}}
+\begin{document}
+
+\maketitle
+\begin{center}
+\texttt{\Huge STCP Protocol}
+\end{center}
+\newpage
+
+\section{Implementation Specs}
+\label{sec:orgheadline1}
+\begin{itemize}
+\item Sliding window is implemented
+\item Proper endianness handling is insured
+\item Abrupt disconnects are handled
+\item Proper errno is set
+\end{itemize}
+
+\section{Test results}
+\label{sec:orgheadline2}
+\begin{itemize}
+\item All Combinations of two clients(reference client and client.c in skeleton) and 
+two server(reference server and server.c in skeleton) are working properly
+\item The client exits cleanly with \texttt{Ctrl+D} and \texttt{Ctrl+C} interrupts and the server with \texttt{Ctrl+C} interrupt.
+\item Single file transfer with \texttt{-f} flag is working properly
+\item Multiple client connections are working fine with one client queued after other
+\end{itemize}
+
+\section{Appendix}
+\label{sec:orgheadline4}
+\subsection{Source code :}
+\label{sec:orgheadline3}
+\begin{verbatim}
 /*
  * transport.c
  *
- *	Project 3
+ *  Project 3
  *
  * This file implements the STCP layer that sits between the
  * mysocket and network layers. You are required to fill in the STCP
@@ -354,3 +413,5 @@ void our_dprintf(const char *format, ...) {
   fputs(buffer, stdout);
   fflush(stdout);
 }
+\end{verbatim}
+\end{document}
